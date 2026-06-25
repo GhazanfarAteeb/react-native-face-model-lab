@@ -109,19 +109,23 @@ export const MODEL_REGISTRY: ModelSpec[] = [
   },
   {
     id: 'facelivt',
-    label: 'FaceLiVT (ICIP 2025)',
+    label: 'FaceLiVT v2-S (ICIP 2025)',
     family: 'FaceLiVT',
     runtime: 'onnx',
-    assetName: 'facelivt.onnx',
-    bundled: false,
+    assetName: 'facelivt_v2_s.onnx',
+    bundled: true,
     input: { width: 112, height: 112, layout: 'NCHW', channels: 'RGB' },
     norm: { mean: 127.5, std: 127.5 },
-    output: { dim: 512, l2normalized: false },
+    // Exported from the official .pt via scripts/export_facelivt.py and verified:
+    // input "data" [b,3,112,112] → output "embedding" 512-D. (The community ONNX
+    // rifatrahman378/facelivt-onnx is broken — it outputs a 1284-D intermediate.)
+    output: { dim: 512, l2normalized: false, inputName: 'data', outputName: 'embedding' },
     align: 'arcface',
-    license: 'unknown',
+    license: 'novendrastywn/FaceLiVT (research; InsightFace-based)',
     notes:
-      'Newest/fastest on paper, but no public weights were found as of build time. Slot kept ready — if the authors release an ONNX, drop it in and flip enabled.',
-    enabled: false,
+      'Hybrid linear-ViT, newest/fastest on paper. Exported from the official PyTorch weights (FaceLiVTv2-Small, 4.62M params). RGB, (x−127.5)/127.5.',
+    downloadUrl: 'https://github.com/novendrastywn/FaceLiVT',
+    enabled: true,
   },
 ];
 
