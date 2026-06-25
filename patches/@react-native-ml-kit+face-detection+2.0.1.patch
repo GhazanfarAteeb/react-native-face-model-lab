@@ -1,0 +1,20 @@
+diff --git a/node_modules/@react-native-ml-kit/face-detection/ios/FaceDetection.m b/node_modules/@react-native-ml-kit/face-detection/ios/FaceDetection.m
+index 87fd4ff..59ff56e 100644
+--- a/node_modules/@react-native-ml-kit/face-detection/ios/FaceDetection.m
++++ b/node_modules/@react-native-ml-kit/face-detection/ios/FaceDetection.m
+@@ -241,7 +241,15 @@ RCT_EXPORT_METHOD(detect: (nonnull NSString*)url
+ {
+     NSURL *_url = [NSURL URLWithString:url];
+     NSData *imageData = [NSData dataWithContentsOfURL:_url];
++    if (!imageData) {
++        reject(@"Face Detection", [NSString stringWithFormat:@"Could not load image data from URL: %@", url], nil);
++        return;
++    }
+     UIImage *image = [UIImage imageWithData:imageData];
++    if (!image) {
++        reject(@"Face Detection", [NSString stringWithFormat:@"Could not decode image from URL: %@", url], nil);
++        return;
++    }
+     MLKVisionImage *visionImage = [[MLKVisionImage alloc] initWithImage:image];
+     MLKFaceDetectorOptions *options = [self getOptions:optionsDict];
+     MLKFaceDetector *faceDetector = [MLKFaceDetector faceDetectorWithOptions:options];

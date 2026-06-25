@@ -35,6 +35,10 @@ local.properties
 !debug.keystore
 .kotlin/
 
+# Android build outputs
+*.apk
+*.aab
+
 # node.js
 #
 node_modules/

@@ -6,6 +6,14 @@ const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
  *
  * @type {import('@react-native/metro-config').MetroConfig}
  */
-const config = {};
+const defaultConfig = getDefaultConfig(__dirname);
 
-module.exports = mergeConfig(getDefaultConfig(__dirname), config);
+const config = {
+  resolver: {
+    // Let Metro bundle model weights as assets (also lets you require() one if you
+    // ever want to). Models are normally loaded from disk, so this is just belt-and-braces.
+    assetExts: [...defaultConfig.resolver.assetExts, 'onnx', 'ort', 'tflite', 'bin'],
+  },
+};
+
+module.exports = mergeConfig(defaultConfig, config);

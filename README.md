@@ -1,97 +1,137 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# FaceModelLab
 
-# Getting Started
+A standalone React Native app for answering **"which face-recognition model is best for the rnbaby pipeline?"** — on real photos, on a real device.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+It reproduces rnbaby's recognition pipeline exactly:
 
-## Step 1: Start Metro
-
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
-
-To start the Metro dev server, run the following command from the root of your React Native project:
-
-```sh
-# Using npm
-npm start
-
-# OR using Yarn
-yarn start
+```
+pick references (baby + parents, separately)
+      │   detect (ML Kit or YuNet) → crop / ArcFace-align → preprocess → embed → L2-normalize
+      ▼
+scan the gallery  ──per face──►  cosine-match against each reference bucket
+      ▼
+ranked best matches per bucket  +  the time the scan took
 ```
 
-## Step 2: Build and run your app
+**Detection and cropping are run once and shared**, so swapping the embedding model
+(the Model screen) is the *only* thing that changes between scans. That's what makes the
+time and match-quality numbers a fair, apples-to-apples comparison — your hint to "use ML
+Kit to cut short the image scanning" is baked into the methodology.
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+## Screens
 
-### Android
+The flow mirrors rnbaby's real reference-selection + scanning UX (no auth, no signup):
 
-```sh
-# Using npm
-npm run android
+1. **Model** — choose the embedding model, the **detector** (ML Kit / YuNet) and
+   **alignment**. Shows each model's input size, channel order, normalization, embedding
+   dim, license, and whether its weight file is present.
+2. **Scan** — fill **Baby** and **Parent** reference *slots* by tapping faces in a grid of
+   faces detected across your recent gallery (rnbaby's face-tile picker — not whole-photo
+   picking). Set scan size + threshold, then **Start finding matches** → a live circular
+   progress ring with stats (photos scanned, faces found, matches).
+3. **Results** — best matches per bucket (ranked by cosine similarity, confidence %), the
+   **time the scan took** (headline + per-stage medians: detect / crop / preprocess /
+   inference), model load + size, and a **Compare runs** table to line up models/detectors.
 
-# OR using Yarn
-yarn android
+## What's measured
+
+| Metric | Meaning |
+| --- | --- |
+| scan duration / ms-per-photo | wall-clock for the whole scan — the "100s of pics in N s" number |
+| per-stage median (detect/crop/preprocess/infer) | where the time actually goes |
+| faces/sec | end-to-end throughput |
+| model load + file size | startup cost and footprint |
+| matches per bucket + similarity | quality — does it actually find the baby? |
+| separation | mean gap between a face's baby-score and parent-score (higher = less confusable) |
+
+## Models included
+
+The registry (`src/models/registry.ts`) ships pre-populated. Adding a model = one entry +
+its weight file.
+
+| Model | Runtime | Input | Dim | State |
+| --- | --- | --- | --- | --- |
+| **MobileFaceNet** (InsightFace w600k_mbf) | ONNX | 112² RGB NCHW | 512 | ✅ bundled — rnbaby baseline |
+| **SFace** (OpenCV Zoo 2021dec) | ONNX | 112² **BGR** NCHW | 128 | ✅ bundled — Apache-2.0, fetched + verified |
+| **GhostFaceNet V2** | ONNX | 112² RGB NCHW | 512 | ✅ bundled — community ONNX, fetched + verified |
+| **EdgeFace-S** (γ=0.5) | ONNX | 112² RGB NCHW | 512 | ✅ bundled — exported from official `.pt` + verified |
+| **FaceNet** (Keras) | ONNX | 160² RGB **NHWC** | 128 | ✅ bundled (89 MB) — prewhiten, verified |
+| FaceLiVT (ICIP 2025) | ONNX | 112² | 512 | placeholder — no public weights exist yet |
+
+Detection can also be switched (Model screen): **ML Kit** (native) or **YuNet** (OpenCV Zoo
+ONNX, bundled). The five **bundled** embedders run out of the box (Android auto-bundles from
+`android/app/src/main/assets/`; on iOS add the `assets/models/*.onnx` files to the Xcode
+target once). SFace and GhostFaceNet were downloaded and their input/output tensor specs
+verified directly from the `.onnx` (`data`→`fc1` 128-D; `input`→`embedding` 512-D).
+
+Bundling all of them is **~140 MB** of model assets (FaceNet alone is 89 MB). To slim the
+app, set `bundled: false` on any registry entry you don't need and push it on demand with
+`npm run push-models` instead.
+
+> ⚠️ **Verify normalization before trusting a comparison.** The fetched models' mean/std are
+> set to each model's *published* preprocessing, but a wrong mean/std silently produces
+> garbage embeddings (low matches) that look like "this model is bad" when it's really
+> mis-fed. Confirm against the source repo and adjust the registry entry.
+
+## Setup
+
+```bash
+cd FaceModelLab
+npm install
 ```
 
 ### iOS
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
-```
-
-Then, and every time you update your native dependencies, run:
-
-```sh
-bundle exec pod install
-```
-
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
-
-```sh
-# Using npm
+```bash
+cd ios && bundle install && bundle exec pod install && cd ..
 npm run ios
-
-# OR using Yarn
-yarn ios
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+**One-time:** the bundled `mobilefacenet.onnx` must be in the app bundle. In Xcode, drag
+`assets/models/mobilefacenet.onnx` into the **FaceModelLab** target → *Copy items if needed*,
+*Add to target*. (Android picks it up automatically from `android/app/src/main/assets/`.)
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+### Android
 
-## Step 3: Modify your app
+```bash
+npm run android
+```
 
-Now that you have successfully run the app, let's make changes!
+Grant the photos permission when prompted (the app requests `READ_MEDIA_IMAGES` on
+Android 13+).
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+## Adding / fetching more models
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+Non-bundled models load from the app's on-device models dir
+(`<Documents>/models/<assetName>`). Drop the file there one of three ways:
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+- **Helper script** (simulator / debug Android): `npm run push-models`
+  — copies everything in `assets/models/*.onnx` to the running app.
+- **iOS device:** Finder → your iPhone → *Files* → FaceModelLab → drop the file in
+  (file sharing is enabled). The app migrates files from the Documents root into `models/`.
+- **adb:** `adb push model.onnx /data/local/tmp/ && adb shell run-as com.facemodellab cp /data/local/tmp/model.onnx files/models/`
 
-## Congratulations! :tada:
+Where to get the weights:
 
-You've successfully run and modified your React Native App. :partying_face:
+- **SFace** → OpenCV Zoo: `models/face_recognition_sface/face_recognition_sface_2021dec.onnx`
+  (rename to `sface_2021dec.onnx`).
+- **EdgeFace** → `otroshi/edgeface` checkpoints → export to ONNX (`torch.onnx.export`, 112²).
+- **GhostFaceNet V2** → `HamadYA/GhostFaceNets` Keras weights → `tf2onnx`.
+- **FaceNet** → already at `assets/models/facenet.onnx` (from rnbaby2): `npm run push-models`.
 
-### Now what?
+Then add a registry entry (copy an existing one and fix `input`, `channels`, `norm`,
+`output.dim`).
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+## Notes / accuracy
 
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+- **Threshold** on the Scan screen is the cosine cut-off for counting a "match"; ranking is
+  shown regardless, so you can eyeball where the right cut-off is per model. rnbaby uses
+  ~0.62–0.75 for its (aligned) MobileFaceNet — other models have different optimal cut-offs.
+- **Alignment** defaults to each model's preference (ArcFace-family → 5-point warp). Use the
+  *ArcFace / Bbox* override on the Model screen to measure how much alignment is worth.
+- **Detector** — ML Kit (native, fast, with classification) or YuNet (OpenCV Zoo ONNX,
+  fixed 640², decoded + NMS in JS). Toggle on the Model screen; the Results stage timing names
+  which ran. Both emit 5 landmarks into the same crop/align path, so detectors compare fairly.
+- The pipeline is pure-JS for decode (jpeg-js) + the ArcFace warp, and native for detection
+  (ML Kit), crop/resize (ImageEditor) and inference (ONNX Runtime) — no Skia, so the
+  native dependency list stays short.

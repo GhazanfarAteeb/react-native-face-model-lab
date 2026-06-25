@@ -5,7 +5,8 @@ require Pod::Executable.execute_command('node', ['-p',
     {paths: [process.argv[1]]},
   )', __dir__]).strip
 
-platform :ios, min_ios_version_supported
+# ML Kit FaceDetection (GoogleMLKit 8.0.0) requires a minimum of iOS 15.5.
+platform :ios, '15.5'
 prepare_react_native_project!
 
 linkage = ENV['USE_FRAMEWORKS']
@@ -30,5 +31,13 @@ target 'FaceModelLab' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # Force every pod target to iOS 15.5 too, so React/other pods don't keep the lower
+    # default target and re-trigger the ML Kit version conflict.
+    installer.pods_project.targets.each do |t|
+      t.build_configurations.each do |c|
+        c.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.5'
+      end
+    end
   end
 end
