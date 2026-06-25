@@ -82,6 +82,9 @@ class YuNetDetector implements Detector {
     try {
       session = await ort.InferenceSession.create(path, {
         executionProviders: providers,
+        // Disable graph optimization for detector models — ORT-mobile's optimizer can
+        // abort (uncatchable) on some detection graphs; correctness over a little speed.
+        graphOptimizationLevel: 'disabled',
       } as ort.InferenceSession.SessionOptions);
     } catch {
       session = await ort.InferenceSession.create(path);
@@ -193,7 +196,7 @@ class YuNetDetector implements Detector {
 
 // ─── SCRFD (InsightFace) ─────────────────────────────────────────────────────
 
-const SCRFD_ASSET = 'scrfd_10g.onnx';
+const SCRFD_ASSET = 'scrfd_640.onnx'; // static 640×640 (the dynamic export aborted ORT-mobile)
 const SCRFD_SIZE = 640;
 const SCRFD_SCORE = 0.5;
 const SCRFD_NMS = 0.4;
@@ -211,6 +214,9 @@ class SCRFDDetector implements Detector {
     try {
       session = await ort.InferenceSession.create(path, {
         executionProviders: providers,
+        // Disable graph optimization for detector models — ORT-mobile's optimizer can
+        // abort (uncatchable) on some detection graphs; correctness over a little speed.
+        graphOptimizationLevel: 'disabled',
       } as ort.InferenceSession.SessionOptions);
     } catch {
       session = await ort.InferenceSession.create(path);
@@ -346,6 +352,9 @@ class BlazeFaceDetector implements Detector {
     try {
       session = await ort.InferenceSession.create(path, {
         executionProviders: providers,
+        // Disable graph optimization for detector models — ORT-mobile's optimizer can
+        // abort (uncatchable) on some detection graphs; correctness over a little speed.
+        graphOptimizationLevel: 'disabled',
       } as ort.InferenceSession.SessionOptions);
     } catch {
       session = await ort.InferenceSession.create(path);
