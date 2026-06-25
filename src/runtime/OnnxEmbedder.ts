@@ -29,11 +29,11 @@ export class OnnxEmbedder implements Embedder {
     const fileSizeBytes = await modelFileSize(spec);
     const t0 = now();
 
-    // Android: XNNPACK (fast, stable CPU kernels) + CPU. We deliberately DON'T use NNAPI:
-    // it can hard-abort (std::terminate / SIGABRT) inside ORT session creation on graphs
-    // it can't partition (e.g. SCRFD), and that native abort is NOT catchable by JS — it
-    // crashes the whole app. XNNPACK never does that.
-    const providers = Platform.OS === 'ios' ? ['coreml', 'cpu'] : ['xnnpack', 'cpu'];
+    // Android: CPU only. Accelerator EPs (NNAPI, and even XNNPACK on some graphs) can
+    // hard-abort (SIGABRT, uncatchable by JS) inside ORT session creation when they fail
+    // to compile a model — crashing the whole app. CPU never does. iOS keeps CoreML + CPU.
+    console.log('[FML] loading ONNX embedder:', spec.id, path);
+    const providers = Platform.OS === 'ios' ? ['coreml', 'cpu'] : ['cpu'];
     let session: ort.InferenceSession;
     try {
       session = await ort.InferenceSession.create(path, {

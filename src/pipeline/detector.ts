@@ -75,9 +75,10 @@ class YuNetDetector implements Detector {
 
   static async create(): Promise<YuNetDetector> {
     const path = await ensureNamedAsset(YUNET_ASSET);
-    // No NNAPI — it can hard-abort (SIGABRT, uncatchable) during ORT session creation on
-    // graphs it can't partition (e.g. SCRFD). XNNPACK is fast and stable.
-    const providers = Platform.OS === 'ios' ? ['coreml', 'cpu'] : ['xnnpack', 'cpu'];
+    // CPU only on Android: accelerator EPs (NNAPI, and XNNPACK on graphs like SCRFD) can
+    // hard-abort (SIGABRT, uncatchable by JS) during ORT session creation. CPU never does.
+    console.log('[FML] loading ONNX detector:', path);
+    const providers = Platform.OS === 'ios' ? ['coreml', 'cpu'] : ['cpu'];
     let session: ort.InferenceSession;
     try {
       session = await ort.InferenceSession.create(path, {
@@ -207,9 +208,10 @@ class SCRFDDetector implements Detector {
 
   static async create(): Promise<SCRFDDetector> {
     const path = await ensureNamedAsset(SCRFD_ASSET);
-    // No NNAPI — it can hard-abort (SIGABRT, uncatchable) during ORT session creation on
-    // graphs it can't partition (e.g. SCRFD). XNNPACK is fast and stable.
-    const providers = Platform.OS === 'ios' ? ['coreml', 'cpu'] : ['xnnpack', 'cpu'];
+    // CPU only on Android: accelerator EPs (NNAPI, and XNNPACK on graphs like SCRFD) can
+    // hard-abort (SIGABRT, uncatchable by JS) during ORT session creation. CPU never does.
+    console.log('[FML] loading ONNX detector:', path);
+    const providers = Platform.OS === 'ios' ? ['coreml', 'cpu'] : ['cpu'];
     let session: ort.InferenceSession;
     try {
       session = await ort.InferenceSession.create(path, {
@@ -345,9 +347,10 @@ class BlazeFaceDetector implements Detector {
 
   static async create(): Promise<BlazeFaceDetector> {
     const path = await ensureNamedAsset(BLAZE_ASSET);
-    // No NNAPI — it can hard-abort (SIGABRT, uncatchable) during ORT session creation on
-    // graphs it can't partition (e.g. SCRFD). XNNPACK is fast and stable.
-    const providers = Platform.OS === 'ios' ? ['coreml', 'cpu'] : ['xnnpack', 'cpu'];
+    // CPU only on Android: accelerator EPs (NNAPI, and XNNPACK on graphs like SCRFD) can
+    // hard-abort (SIGABRT, uncatchable by JS) during ORT session creation. CPU never does.
+    console.log('[FML] loading ONNX detector:', path);
+    const providers = Platform.OS === 'ios' ? ['coreml', 'cpu'] : ['cpu'];
     let session: ort.InferenceSession;
     try {
       session = await ort.InferenceSession.create(path, {
