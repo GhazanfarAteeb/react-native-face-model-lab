@@ -16,6 +16,31 @@
  */
 import type { ModelSpec } from '../types';
 
+/**
+ * FaceLiVT variants (novendrastywn/FaceLiVT) all share the same contract: 112² RGB NCHW,
+ * (x−127.5)/127.5, input "data" → output "embedding" 512-D, ArcFace alignment. Each was
+ * exported from the official .pt via scripts/export_facelivt.py (the community ONNX is
+ * broken — it outputs a 1284-D intermediate). This helper keeps the six entries DRY.
+ */
+function faceLivt(id: string, label: string, assetName: string, note: string): ModelSpec {
+  return {
+    id,
+    label,
+    family: 'FaceLiVT',
+    runtime: 'onnx',
+    assetName,
+    bundled: true,
+    input: { width: 112, height: 112, layout: 'NCHW', channels: 'RGB' },
+    norm: { mean: 127.5, std: 127.5 },
+    output: { dim: 512, l2normalized: false, inputName: 'data', outputName: 'embedding' },
+    align: 'arcface',
+    license: 'novendrastywn/FaceLiVT (research; InsightFace-based)',
+    notes: `${note} Hybrid linear-ViT; exported from official PyTorch weights. RGB, (x−127.5)/127.5.`,
+    downloadUrl: 'https://github.com/novendrastywn/FaceLiVT',
+    enabled: true,
+  };
+}
+
 export const MODEL_REGISTRY: ModelSpec[] = [
   {
     id: 'mobilefacenet',
@@ -107,26 +132,13 @@ export const MODEL_REGISTRY: ModelSpec[] = [
     downloadUrl: 'https://huggingface.co/raj0120/edge-face-pipeline',
     enabled: true,
   },
-  {
-    id: 'facelivt',
-    label: 'FaceLiVT v2-S (ICIP 2025)',
-    family: 'FaceLiVT',
-    runtime: 'onnx',
-    assetName: 'facelivt_v2_s.onnx',
-    bundled: true,
-    input: { width: 112, height: 112, layout: 'NCHW', channels: 'RGB' },
-    norm: { mean: 127.5, std: 127.5 },
-    // Exported from the official .pt via scripts/export_facelivt.py and verified:
-    // input "data" [b,3,112,112] → output "embedding" 512-D. (The community ONNX
-    // rifatrahman378/facelivt-onnx is broken — it outputs a 1284-D intermediate.)
-    output: { dim: 512, l2normalized: false, inputName: 'data', outputName: 'embedding' },
-    align: 'arcface',
-    license: 'novendrastywn/FaceLiVT (research; InsightFace-based)',
-    notes:
-      'Hybrid linear-ViT, newest/fastest on paper. Exported from the official PyTorch weights (FaceLiVTv2-Small, 4.62M params). RGB, (x−127.5)/127.5.',
-    downloadUrl: 'https://github.com/novendrastywn/FaceLiVT',
-    enabled: true,
-  },
+  // FaceLiVT (ICIP/APCCAS 2025) — six variants, exported from official weights.
+  faceLivt('facelivt_v1_s', 'FaceLiVT v1-S', 'facelivt_v1_s.onnx', 'FaceLiVT v1 Small (MHLA).'),
+  faceLivt('facelivt_v1_m', 'FaceLiVT v1-M', 'facelivt_v1_m.onnx', 'FaceLiVT v1 Medium (MHLA).'),
+  faceLivt('facelivt_v2_xs', 'FaceLiVT v2-XS', 'facelivt_v2_xs.onnx', 'FaceLiVTv2 X-Small (Lite MHLA, smallest).'),
+  faceLivt('facelivt_v2_s', 'FaceLiVT v2-S', 'facelivt_v2_s.onnx', 'FaceLiVTv2 Small (4.62M params).'),
+  faceLivt('facelivt_v2_m', 'FaceLiVT v2-M', 'facelivt_v2_m.onnx', 'FaceLiVTv2 Medium.'),
+  faceLivt('facelivt_v2_l', 'FaceLiVT v2-L', 'facelivt_v2_l.onnx', 'FaceLiVTv2 Large (most accurate FaceLiVT).'),
 ];
 
 export function getModel(id: string): ModelSpec | undefined {
