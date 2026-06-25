@@ -111,8 +111,8 @@ export interface ScanSettings {
   /** 'spec' uses the model's preferred crop; force-* overrides it. */
   align: 'spec' | 'force-arcface' | 'force-bbox';
   minFaceSize: number;
-  /** Face detector: ML Kit (native) or YuNet (ONNX). */
-  detector: 'mlkit' | 'yunet';
+  /** Face detector: ML Kit (native), or an ONNX detector (YuNet / SCRFD / BlazeFace). */
+  detector: 'mlkit' | 'yunet' | 'scrfd' | 'blazeface';
 }
 
 /** A scanned face that matched a bucket. */

@@ -50,9 +50,15 @@ export default function ModelScreen() {
           onChange={v => setSettings({ detector: v })}
           options={[
             { label: 'ML Kit', value: 'mlkit' },
-            { label: 'YuNet (ONNX)', value: 'yunet' },
+            { label: 'YuNet', value: 'yunet' },
+            { label: 'SCRFD', value: 'scrfd' },
+            { label: 'Blaze', value: 'blazeface' },
           ]}
         />
+        <Muted style={{ marginTop: spacing.xs }}>
+          ML Kit is BlazeFace-family. SCRFD gives 5 landmarks (aligns); BlazeFace gives a
+          mouth-centre only, so it falls back to bbox crop.
+        </Muted>
         <View style={{ height: spacing.md }} />
         <SectionLabel>Alignment</SectionLabel>
         <Segmented
