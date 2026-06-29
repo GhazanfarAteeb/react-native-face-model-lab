@@ -113,6 +113,19 @@ export interface ScanSettings {
   minFaceSize: number;
   /** Face detector: ML Kit (native), or an ONNX detector (YuNet / SCRFD / BlazeFace). */
   detector: 'mlkit' | 'yunet' | 'scrfd' | 'blazeface';
+  /** How many photos to process concurrently. 0 = Auto (device-adaptive, see
+   *  deviceProfile); 1 = the old sequential behaviour; higher overlaps native I/O +
+   *  detection across photos (ORT inference stays serialized). */
+  concurrency: number;
+  /** Cap each photo to this many px on the long side before detection (0 = full res).
+   *  Large gallery photos are downscaled uniformly so detection is much faster without
+   *  losing real-world face detail. Applies equally to all models (fair comparison). */
+  maxImageDim: number;
+  /** Reuse detection + aligned crops across runs (see scanCache). Massively speeds up
+   *  re-scanning the same gallery with different models; turn off to benchmark cold cost. */
+  reuseCache: boolean;
+  /** ML Kit only: use the faster (lower-recall) detector instead of the accurate one. */
+  fastDetect: boolean;
 }
 
 /** A scanned face that matched a bucket. */
@@ -137,10 +150,24 @@ export interface TimingStats {
 }
 
 export interface StageTimings {
+  decode: TimingStats | null;
   detect: TimingStats | null;
   crop: TimingStats | null;
   preprocess: TimingStats | null;
   infer: TimingStats | null;
+  similarity: TimingStats | null;
+  total: TimingStats | null;
+}
+
+/** Running per-stage means (ms) emitted live during a scan for the on-screen breakdown. */
+export interface LiveStageStats {
+  decode: number;
+  detect: number;
+  align: number;
+  preprocess: number;
+  embed: number;
+  similarity: number;
+  total: number;
 }
 
 /** Result of one scan with one model — the comparable unit. */
@@ -163,7 +190,23 @@ export interface ScanRun {
   stages: StageTimings;
   /** Mean of each face's best baby-vs-parent score gap — a quick "separation" proxy. */
   separation: number;
+  /** Cross-run cache reuse for this scan (detection + crop). Hits ⇒ work skipped vs a
+   *  cold run; lets the Results screen show the warm-rerun speed-up. */
+  cacheStats?: { detectHits: number; detectMisses: number; cropHits: number; cropMisses: number };
   error?: string;
+}
+
+/** Streamed once per scanned photo (as it finishes, possibly out of order) so the live
+ *  screen can show matched/unmatched thumbnails in real time. */
+export interface ScanPhotoEvent {
+  index: number; // 0-based position in the scanned list
+  uri: string; // original gallery URI (full-res — do NOT render directly in a grid)
+  thumbUri?: string; // small persisted thumbnail (~150px) safe to render in the live grid
+  faceCount: number;
+  matched: boolean; // best face's similarity met the threshold
+  bucket?: RefBucket; // best-matching bucket (set when matched)
+  similarity: number; // best similarity across faces, or -1 if no face
+  ms: number; // wall-clock to process this photo
 }
 
 export interface ScanProgress {
@@ -174,4 +217,6 @@ export interface ScanProgress {
   facesFound: number;
   matchesSoFar: number;
   fraction: number;
+  /** Live per-stage means for the on-screen breakdown (present during 'scanning'). */
+  liveStages?: LiveStageStats;
 }

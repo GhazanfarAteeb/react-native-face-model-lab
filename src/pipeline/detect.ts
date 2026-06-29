@@ -28,11 +28,13 @@ function pos(p: MLPos): Point2D | undefined {
 
 /** Detect faces at least `minFaceSize` px on the shorter side. `path` is a plain file
  *  path (no scheme). */
-export async function detectFaces(path: string, minFaceSize: number): Promise<DetectResult> {
+export async function detectFaces(path: string, minFaceSize: number, accurate = true): Promise<DetectResult> {
   const uri = toUri(path);
   const [faces, dims] = await Promise.all([
     FaceDetection.detect(uri, {
-      performanceMode: 'accurate',
+      // 'fast' uses ML Kit's lighter detector — markedly quicker per image at some recall
+      // cost; landmarks (needed for arcface) are still returned.
+      performanceMode: accurate ? 'accurate' : 'fast',
       landmarkMode: 'all',
       contourMode: 'none',
       classificationMode: 'none',

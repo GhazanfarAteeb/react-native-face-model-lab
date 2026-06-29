@@ -22,6 +22,7 @@ import type { DetectResult, DetectedFace, Landmarks5, Point2D } from '../types';
 import { detectFaces } from './detect';
 import { decodeJpeg } from './decode';
 import { ensureNamedAsset } from '../runtime/modelAssets';
+import { ortLock } from '../runtime/ortLock';
 
 export interface Detector {
   label: string;
@@ -31,13 +32,19 @@ export interface Detector {
 
 export type DetectorKind = 'mlkit' | 'yunet' | 'scrfd' | 'blazeface';
 
-export async function createDetector(kind: DetectorKind): Promise<Detector> {
+export interface DetectorOptions {
+  /** ML Kit only: accurate (default) vs fast performance mode. */
+  accurate?: boolean;
+}
+
+export async function createDetector(kind: DetectorKind, opts: DetectorOptions = {}): Promise<Detector> {
   if (kind === 'yunet') return YuNetDetector.create();
   if (kind === 'scrfd') return SCRFDDetector.create();
   if (kind === 'blazeface') return BlazeFaceDetector.create();
+  const accurate = opts.accurate ?? true;
   return {
-    label: 'ML Kit',
-    detect: (path, minFaceSize) => detectFaces(path, minFaceSize),
+    label: accurate ? 'ML Kit' : 'ML Kit (fast)',
+    detect: (path, minFaceSize) => detectFaces(path, minFaceSize, accurate),
     dispose: async () => {},
   };
 }
@@ -127,9 +134,11 @@ class YuNetDetector implements Detector {
     }
 
     const inName = this.session.inputNames[0];
-    const out = await this.session.run({
-      [inName]: new ort.Tensor('float32', input, [1, 3, YUNET_SIZE, YUNET_SIZE]),
-    });
+    const out = await ortLock.run(() =>
+      this.session.run({
+        [inName]: new ort.Tensor('float32', input, [1, 3, YUNET_SIZE, YUNET_SIZE]),
+      }),
+    );
     const get = (n: string) => out[n].data as Float32Array;
 
     const raw: RawFace[] = [];
@@ -259,9 +268,11 @@ class SCRFDDetector implements Detector {
     }
 
     const inName = this.session.inputNames[0];
-    const out = await this.session.run({
-      [inName]: new ort.Tensor('float32', input, [1, 3, SCRFD_SIZE, SCRFD_SIZE]),
-    });
+    const out = await ortLock.run(() =>
+      this.session.run({
+        [inName]: new ort.Tensor('float32', input, [1, 3, SCRFD_SIZE, SCRFD_SIZE]),
+      }),
+    );
     // Output order is the InsightFace SCRFD convention:
     // [score8, score16, score32, bbox8, bbox16, bbox32, kps8, kps16, kps32].
     const on = this.session.outputNames;
@@ -401,12 +412,14 @@ class BlazeFaceDetector implements Detector {
     }
 
     // The model does decode + NMS internally; thresholds are inputs.
-    const out = await this.session.run({
-      image: new ort.Tensor('float32', input, [1, 3, BLAZE_SIZE, BLAZE_SIZE]),
-      conf_threshold: new ort.Tensor('float32', new Float32Array([0.5]), [1]),
-      iou_threshold: new ort.Tensor('float32', new Float32Array([0.3]), [1]),
-      max_detections: new ort.Tensor('int64', BigInt64Array.from([50n]), [1]),
-    });
+    const out = await ortLock.run(() =>
+      this.session.run({
+        image: new ort.Tensor('float32', input, [1, 3, BLAZE_SIZE, BLAZE_SIZE]),
+        conf_threshold: new ort.Tensor('float32', new Float32Array([0.5]), [1]),
+        iou_threshold: new ort.Tensor('float32', new Float32Array([0.3]), [1]),
+        max_detections: new ort.Tensor('int64', BigInt64Array.from([50n]), [1]),
+      }),
+    );
     const t = out.selectedBoxes ?? out[this.session.outputNames[0]];
     const data = t.data as Float32Array;
     const n = Math.floor(data.length / 16);

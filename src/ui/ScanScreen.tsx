@@ -10,7 +10,7 @@ import { useStore } from '../scan/store';
 import { recentPhotoUris } from '../scan/gallery';
 import { Button, Card, Chip, Muted, SectionLabel } from './components';
 import FacePicker from './FacePicker';
-import ScanningView from './ScanningView';
+import LiveScanScreen from './LiveScanScreen';
 import { theme, spacing, radius, mono } from './theme';
 import type { RefBucket } from '../types';
 
@@ -45,11 +45,22 @@ export default function ScanScreen({ goToResults }: { goToResults: () => void })
     progress,
     addRefs,
     startScan,
+    resumable,
+    resumeScan,
   } = useStore();
   const [picking, setPicking] = useState<RefBucket | null>(null);
   const [preparing, setPreparing] = useState(false);
 
   const hasRefs = babyRefs.length + parentRefs.length > 0;
+
+  const onResume = useCallback(async () => {
+    try {
+      const run = await resumeScan();
+      if (run) goToResults();
+    } catch (e) {
+      Alert.alert('Resume failed', String(e instanceof Error ? e.message : e));
+    }
+  }, [resumeScan, goToResults]);
 
   const onScan = useCallback(async () => {
     setPreparing(true);
@@ -69,8 +80,8 @@ export default function ScanScreen({ goToResults }: { goToResults: () => void })
     }
   }, [settings.maxPhotos, startScan, goToResults]);
 
-  // Live scan ring takes over the whole tab while a scan runs.
-  if (scanning && progress) return <ScanningView progress={progress} />;
+  // Live scan grid takes over the whole tab while a scan runs.
+  if (scanning && progress) return <LiveScanScreen progress={progress} />;
 
   // Face picker takes over the whole tab while choosing references.
   if (picking) {
@@ -123,7 +134,54 @@ export default function ScanScreen({ goToResults }: { goToResults: () => void })
           </Pressable>
           <Muted style={{ flex: 1, marginLeft: spacing.md }}>Detector & alignment are on the Model tab.</Muted>
         </View>
+        <SectionLabel>Parallelism (scan speed)</SectionLabel>
+        <View style={styles.chipRow}>
+          {[0, 1, 2, 3, 4, 6].map(n => (
+            <Chip
+              key={n}
+              label={n === 0 ? 'Auto' : n === 1 ? '1 (off)' : `×${n}`}
+              active={settings.concurrency === n}
+              onPress={() => setSettings({ concurrency: n })}
+            />
+          ))}
+        </View>
+        <Muted>Auto picks a level from a quick device benchmark. Higher overlaps more I/O & detection (faster) but uses more memory; inference stays serialized for stability.</Muted>
+        <SectionLabel>Detection resolution</SectionLabel>
+        <View style={styles.chipRow}>
+          {[
+            { n: 0, label: 'Full' },
+            { n: 1280, label: '1280' },
+            { n: 1600, label: '1600' },
+            { n: 2048, label: '2048' },
+          ].map(o => (
+            <Chip key={o.n} label={o.label} active={settings.maxImageDim === o.n} onPress={() => setSettings({ maxImageDim: o.n })} />
+          ))}
+        </View>
+        <Muted>Large photos are downscaled before detection — big speed-up with little quality loss. Lower if scans feel slow; “Full” for maximum detail.</Muted>
+        <SectionLabel>Detection quality</SectionLabel>
+        <View style={styles.chipRow}>
+          <Chip label="Accurate" active={!settings.fastDetect} onPress={() => setSettings({ fastDetect: false })} />
+          <Chip label="Fast" active={settings.fastDetect} onPress={() => setSettings({ fastDetect: true })} />
+        </View>
+        <Muted>“Fast” uses ML Kit’s lighter detector — quicker per photo, may miss small/angled faces.</Muted>
+        <SectionLabel>Reuse cache across runs</SectionLabel>
+        <View style={styles.chipRow}>
+          <Chip label="On" active={settings.reuseCache} onPress={() => setSettings({ reuseCache: true })} />
+          <Chip label="Off (cold)" active={!settings.reuseCache} onPress={() => setSettings({ reuseCache: false })} />
+        </View>
+        <Muted>Reuses detection & crops when re-scanning the same photos with another model — only inference re-runs. Turn off to measure cold cost.</Muted>
       </Card>
+
+      {resumable ? (
+        <Card>
+          <SectionLabel>Resume interrupted scan</SectionLabel>
+          <Muted>
+            {resumable.done}/{resumable.total} photos already done. Continue where it stopped instead of restarting.
+          </Muted>
+          <View style={{ height: spacing.sm }} />
+          <Button title={`Resume (${resumable.total - resumable.done} left)`} onPress={onResume} variant="secondary" />
+        </Card>
+      ) : null}
 
       <Button
         title={hasRefs ? `Start finding matches` : 'Add a baby reference first'}

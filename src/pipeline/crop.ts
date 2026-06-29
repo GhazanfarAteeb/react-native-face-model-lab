@@ -35,7 +35,9 @@ async function cropRegion(
     displaySize: { width: dispW, height: dispH },
     resizeMode: 'cover',
     format: 'jpeg',
-    quality: 1,
+    // 0.85 (vs 1.0) cuts the native JPEG encode + the JS decode of this intermediate crop;
+    // it's resized to the model's small input anyway, so quality impact is negligible.
+    quality: 0.85,
   })) as { uri: string } | string;
   const uri = typeof res === 'string' ? res : res.uri;
   try {

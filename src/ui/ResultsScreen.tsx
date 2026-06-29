@@ -7,9 +7,9 @@ import React, { useMemo, useState } from 'react';
 import {
   Alert,
   Dimensions,
+  FlatList,
   Image,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -27,10 +27,13 @@ const THUMB = (Dimensions.get('window').width - spacing.lg * 2 - GAP * (COLS - 1
 
 function StageTimings({ run }: { run: ScanRun }) {
   const rows: [string, string][] = [
+    ['decode image', fmtMedian(run.stages.decode)],
     [`detect (${run.detectorLabel})`, fmtMedian(run.stages.detect)],
     ['crop + align', fmtMedian(run.stages.crop)],
     ['preprocess', fmtMedian(run.stages.preprocess)],
-    ['inference', fmtMedian(run.stages.infer)],
+    [`embed (${run.modelLabel})`, fmtMedian(run.stages.infer)],
+    ['similarity search', fmtMedian(run.stages.similarity)],
+    ['total / photo', fmtMedian(run.stages.total)],
   ];
   return (
     <View style={styles.stageBox}>
@@ -45,32 +48,45 @@ function StageTimings({ run }: { run: ScanRun }) {
   );
 }
 
-function MatchGrid({ run, bucket }: { run: ScanRun; bucket: RefBucket }) {
-  const matches = useMemo(
-    () => run.matches.filter(m => m.bucket === bucket).slice(0, 60),
-    [run, bucket],
-  );
-  if (!matches.length) {
-    return <Muted style={{ marginTop: spacing.md }}>No {bucket} matches above the threshold.</Muted>;
-  }
+function CacheLine({ run }: { run: ScanRun }) {
+  const c = run.cacheStats;
+  if (!c) return null;
+  const detTotal = c.detectHits + c.detectMisses;
+  const cropTotal = c.cropHits + c.cropMisses;
+  if (detTotal + cropTotal === 0) return null;
+  const pct = (h: number, t: number) => (t ? Math.round((h / t) * 100) : 0);
+  // A warm rerun (high reuse) shows the cache skipping detect/crop; a cold run is ~0%.
   return (
-    <View style={styles.grid}>
-      {matches.map((m, i) => (
-        <View key={`${m.uri}#${i}`} style={[styles.cell, { width: THUMB, height: THUMB }]}>
-          <Image source={{ uri: m.uri }} style={styles.cellImg} />
-          <View style={styles.simBadge}>
-            <Text style={styles.simText}>{(m.similarity * 100).toFixed(0)}%</Text>
-          </View>
-        </View>
-      ))}
+    <View style={styles.cacheBox}>
+      <Text style={styles.cacheText}>
+        cache reuse · detect {pct(c.detectHits, detTotal)}%  ·  crop {pct(c.cropHits, cropTotal)}%
+      </Text>
+      <Text style={styles.cacheSub}>
+        {c.detectHits} detections + {c.cropHits} crops reused from earlier runs
+      </Text>
     </View>
   );
 }
 
+// One match thumbnail. Rendered inside a WINDOWED FlatList (see ResultsScreen) so only the
+// visible images decode — mounting all matches at once decodes a full-res (~48MB) bitmap
+// each and exhausts memory on large galleries.
+const MatchCell = React.memo(({ uri, similarity }: { uri: string; similarity: number }) => {
+  return (
+    <View style={[styles.cell, { width: THUMB, height: THUMB }]}>
+      <Image source={{ uri }} style={styles.cellImg} resizeMethod="resize" />
+      <View style={styles.simBadge}>
+        <Text style={styles.simText}>{(similarity * 100).toFixed(0)}%</Text>
+      </View>
+    </View>
+  );
+});
+
 export default function ResultsScreen() {
-  const { runs, latestRun, clearRuns } = useStore();
+  const { runs, latestRun, clearRuns, clearCache, cacheSizes } = useStore();
   const [viewedId, setViewedId] = useState<string | null>(null);
   const [bucket, setBucket] = useState<RefBucket>('baby');
+  const [cacheSz, setCacheSz] = useState(() => cacheSizes());
 
   const run = useMemo(
     () => runs.find(r => r.id === viewedId) ?? latestRun,
@@ -102,8 +118,11 @@ export default function ResultsScreen() {
     ...runs.filter(r => r.stages.infer).map(r => r.stages.infer!.median),
   );
 
-  return (
-    <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+  // Bucket-filtered matches drive the windowed grid (data of the FlatList).
+  const gridMatches = run.error ? [] : run.matches.filter(m => m.bucket === bucket).slice(0, 120);
+
+  const header = (
+    <>
       {run.error ? (
         <Card style={{ borderColor: theme.bad }}>
           <Badge text="ERROR" tone="bad" />
@@ -132,11 +151,12 @@ export default function ResultsScreen() {
             <Stat label="separation" value={run.separation.toFixed(3)} hint="baby vs parent gap" />
           </View>
           <StageTimings run={run} />
+          <CacheLine run={run} />
         </Card>
       )}
 
       {!run.error && (
-        <Card>
+        <View style={styles.matchHeader}>
           <SectionLabel>Best matches</SectionLabel>
           <Segmented
             value={bucket}
@@ -146,9 +166,37 @@ export default function ResultsScreen() {
               { label: `Parent (${run.parentMatchCount})`, value: 'parent' },
             ]}
           />
-          <MatchGrid run={run} bucket={bucket} />
-          <View style={{ height: spacing.md }} />
+          {gridMatches.length === 0 && (
+            <Muted style={{ marginTop: spacing.md }}>No {bucket} matches above the threshold.</Muted>
+          )}
+        </View>
+      )}
+    </>
+  );
+
+  const footer = (
+    <>
+      {!run.error && (
+        <Card style={{ marginTop: spacing.md }}>
           <Button title="Export run as JSON" variant="secondary" onPress={onExport} />
+        </Card>
+      )}
+
+      {!run.error && (
+        <Card>
+          <SectionLabel>Scan cache</SectionLabel>
+          <Muted>
+            {cacheSz.detect} detections · {cacheSz.crop} crops held in memory. Clear to benchmark a cold (un-cached) run.
+          </Muted>
+          <View style={{ height: spacing.sm }} />
+          <Button
+            title="Clear scan cache"
+            variant="secondary"
+            onPress={() => {
+              clearCache();
+              setCacheSz(cacheSizes());
+            }}
+          />
         </Card>
       )}
 
@@ -188,7 +236,26 @@ export default function ResultsScreen() {
         </Card>
       )}
       <View style={{ height: spacing.xl }} />
-    </ScrollView>
+    </>
+  );
+
+  return (
+    <FlatList
+      style={styles.scroll}
+      contentContainerStyle={styles.content}
+      data={gridMatches}
+      key={COLS}
+      numColumns={COLS}
+      keyExtractor={(m, i) => `${m.uri}#${i}`}
+      renderItem={({ item }) => <MatchCell uri={item.uri} similarity={item.similarity} />}
+      columnWrapperStyle={styles.gridRow}
+      ListHeaderComponent={header}
+      ListFooterComponent={footer}
+      removeClippedSubviews
+      initialNumToRender={9}
+      maxToRenderPerBatch={9}
+      windowSize={5}
+    />
   );
 }
 
@@ -206,8 +273,12 @@ const styles = StyleSheet.create({
   stageRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
   stageKey: { color: theme.textFaint, fontSize: 13 },
   stageVal: { color: theme.text, fontSize: 13, fontFamily: mono },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.md },
-  cell: { marginRight: GAP, marginBottom: GAP, borderRadius: radius.sm, overflow: 'hidden', backgroundColor: theme.surfaceAlt },
+  cacheBox: { marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
+  cacheText: { color: theme.accent, fontSize: 12, fontWeight: '700', fontFamily: mono },
+  cacheSub: { color: theme.textFaint, fontSize: 11, marginTop: 1 },
+  matchHeader: { marginBottom: spacing.sm },
+  gridRow: { gap: GAP, marginBottom: GAP },
+  cell: { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: theme.surfaceAlt },
   cellImg: { width: '100%', height: '100%' },
   simBadge: { position: 'absolute', bottom: 4, left: 4, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
   simText: { color: '#fff', fontSize: 11, fontWeight: '700', fontFamily: mono },

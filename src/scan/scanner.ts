@@ -10,9 +10,16 @@
 import { createEmbedder } from '../runtime/Embedder';
 import type { Embedder } from '../runtime/Embedder';
 import { createDetector, type Detector } from '../pipeline/detector';
-import { embedImage, emptySink, type TimingSink } from './embedFace';
+import { embedImage, emptySink, type EmbedCacheCtx, type TimingSink } from './embedFace';
 import { normalizeUri } from '../pipeline/normalizeUri';
+import { downscaleForScan } from '../pipeline/downscale';
+import { clearThumbs, makeThumb } from '../pipeline/thumbnail';
 import { cosineSimilarity } from '../pipeline/similarity';
+import { runPool, withTimeout } from './concurrency';
+import { emptyCacheStats, setCacheEnabled } from './scanCache';
+import { resolveConcurrency } from './deviceProfile';
+import { FrameBudget } from './scheduler';
+import type { ScanProgressState } from './checkpoint';
 import { now, summarize } from '../bench/timing';
 import type {
   AlignMode,
@@ -21,6 +28,7 @@ import type {
   ReferenceEmbedding,
   ReferenceImage,
   ScanMatch,
+  ScanPhotoEvent,
   ScanProgress,
   ScanRun,
   ScanSettings,
@@ -47,8 +55,20 @@ export interface RunScanParams {
   photoUris: string[];
   settings: ScanSettings;
   onProgress?: (p: ScanProgress) => void;
+  onPhoto?: (e: ScanPhotoEvent) => void;
+  /** Prior progress to continue from (skips already-done photos, keeps prior matches). */
+  resume?: ScanProgressState;
+  /** Periodic snapshot of resumable progress; persist this to survive interruption. */
+  onCheckpoint?: (state: ScanProgressState) => void;
   shouldCancel?: () => boolean;
 }
+
+/** Persist a checkpoint roughly every this-many newly-processed photos. */
+const CHECKPOINT_EVERY = 20;
+
+/** Hard ceiling for one photo's detect+crop+embed. A malformed image that hangs a native
+ *  call would otherwise wedge a worker; on timeout the photo is counted as error + skipped. */
+const PER_PHOTO_TIMEOUT_MS = 30_000;
 
 /** Per-reference face counts so the UI can flag refs where no face was found. */
 export type RefFaceCounts = Record<string, number>;
@@ -61,13 +81,18 @@ async function buildRefs(
   minFaceSize: number,
   sink: TimingSink,
   detector: Detector,
+  maxImageDim: number,
 ): Promise<{ embeddings: ReferenceEmbedding[]; counts: RefFaceCounts }> {
   const embeddings: ReferenceEmbedding[] = [];
   const counts: RefFaceCounts = {};
   for (const ref of references) {
-    const norm = await normalizeUri(ref.uri);
+    const norm = await normalizeUri(ref.uri, maxImageDim);
+    // Same working resolution as scanned photos, so reference embeddings match.
+    const work = norm.downscaled
+      ? { path: norm.path, cleanup: async () => {} }
+      : await downscaleForScan(norm.path, maxImageDim);
     try {
-      const faces = await embedImage(norm.path, embedder, spec, align, minFaceSize, sink, detector);
+      const faces = await embedImage(work.path, embedder, spec, align, minFaceSize, sink, detector);
       counts[ref.uri] = faces.length;
       if (faces.length) {
         // Primary subject = largest face (matches rnbaby's reference convention).
@@ -80,6 +105,7 @@ async function buildRefs(
     } catch {
       counts[ref.uri] = 0;
     } finally {
+      await work.cleanup();
       await norm.cleanup();
     }
   }
@@ -112,14 +138,14 @@ function erroredRun(
     parentMatchCount: 0,
     avgMsPerPhoto: 0,
     facesPerSec: 0,
-    stages: { detect: null, crop: null, preprocess: null, infer: null },
+    stages: { decode: null, detect: null, crop: null, preprocess: null, infer: null, similarity: null, total: null },
     separation: 0,
     error,
   };
 }
 
 export async function runScan(params: RunScanParams): Promise<ScanRun> {
-  const { spec, references, photoUris, settings, onProgress, shouldCancel } = params;
+  const { spec, references, photoUris, settings, onProgress, onPhoto, resume, onCheckpoint, shouldCancel } = params;
   const align = resolveAlign(spec, settings);
   const startedAt = Date.now();
   const wall0 = now();
@@ -152,7 +178,7 @@ export async function runScan(params: RunScanParams): Promise<ScanRun> {
   try {
     emit('loading', `Loading ${spec.label}…`, 0);
     embedder = await createEmbedder(spec);
-    detector = await createDetector(settings.detector);
+    detector = await createDetector(settings.detector, { accurate: !settings.fastDetect });
     const loadMs = embedder.loadMs;
     const fileSizeBytes = embedder.fileSizeBytes;
 
@@ -165,6 +191,7 @@ export async function runScan(params: RunScanParams): Promise<ScanRun> {
       settings.minFaceSize,
       refSink,
       detector,
+      settings.maxImageDim,
     );
     const babyRefs = refEmb.filter(r => r.bucket === 'baby');
     const parentRefs = refEmb.filter(r => r.bucket === 'parent');
@@ -172,18 +199,88 @@ export async function runScan(params: RunScanParams): Promise<ScanRun> {
       throw new Error('No face found in any reference image. Pick clearer, front-facing photos.');
     }
 
-    const matches: ScanMatch[] = [];
-    let facesFound = 0;
-    let processed = 0;
-    let sepSum = 0;
-    let sepCount = 0;
+    // Seed from a prior checkpoint when resuming; otherwise start clean.
+    const done = new Set<number>(resume?.doneIndices ?? []);
+    const matches: ScanMatch[] = resume?.matches ? [...resume.matches] : [];
+    let facesFound = resume?.facesFound ?? 0;
+    let processed = done.size;
+    let sepSum = resume?.sepSum ?? 0;
+    let sepCount = resume?.sepCount ?? 0;
 
-    for (let i = 0; i < total; i++) {
-      if (shouldCancel?.()) break;
+    const snapshot = (): ScanProgressState => ({
+      doneIndices: [...done],
+      matches: [...matches],
+      facesFound,
+      sepSum,
+      sepCount,
+    });
+
+    const mean = (a: number[]): number => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
+    const liveStages = () => ({
+      decode: mean(sink.decode),
+      detect: mean(sink.detect),
+      align: mean(sink.crop),
+      preprocess: mean(sink.preprocess),
+      embed: mean(sink.infer),
+      similarity: mean(sink.similarity),
+      total: mean(sink.total),
+    });
+
+    // Process several photos at once so each one's native I/O (asset copy), detection and
+    // ORT inference overlap with the others' JS work. ORT runs themselves stay serialized
+    // (see ortLock), so the speed-up comes from hiding I/O + detection latency, not from
+    // running multiple inferences in parallel. The fold below (matches/counters) runs
+    // synchronously after each `await`, so it's atomic on JS's single thread.
+    // 0 = Auto (device-adaptive); otherwise the user's explicit choice.
+    const concurrency = resolveConcurrency(settings.concurrency);
+    // Shared across workers (one JS thread) so total contiguous JS time between yields is
+    // bounded regardless of how many photos are in flight.
+    const frame = new FrameBudget(8);
+
+    // Cross-run cache: reuse detection + crops (model-agnostic) so reruns with other models
+    // skip those stages. Stats let Results show the warm-rerun speed-up.
+    setCacheEnabled(settings.reuseCache);
+    await clearThumbs(); // fresh live-grid thumbnails for this scan
+    const cacheStats = emptyCacheStats();
+    const cacheCtx: EmbedCacheCtx = {
+      // detectorKind drives the cache key; the ML Kit fast/accurate mode changes which faces
+      // are found AND their landmarks (→ crops), so it must be part of the key or a mode
+      // switch would wrongly reuse the other mode's cached detections/crops.
+      detectorKind: settings.detector === 'mlkit' && settings.fastDetect ? 'mlkit-fast' : settings.detector,
+      maxImageDim: settings.maxImageDim,
+      uri: '',
+      stats: cacheStats,
+    };
+
+    const scanPhoto = async (i: number): Promise<void> => {
+      if (done.has(i)) return; // already processed in a previous (resumed) run
       const uri = photoUris[i];
-      const norm = await normalizeUri(uri);
+      const t0 = now();
+      let faceCount = 0;
+      let bestSim = -1;
+      let bestBucket: RefBucket = 'baby';
+      let thumbUri: string | undefined;
+      const dec0 = now();
+      // Ask the source for an already-downscaled copy (iOS PhotoKit); only fall back to a
+      // separate ImageEditor downscale when it didn't (Android content://, local files).
+      const norm = await normalizeUri(uri, settings.maxImageDim);
+      const work = norm.downscaled
+        ? { path: norm.path, cleanup: async () => {} }
+        : await downscaleForScan(norm.path, settings.maxImageDim);
+      sink.decode.push(now() - dec0);
       try {
-        const faces = await embedImage(norm.path, embedder, spec, align, settings.minFaceSize, sink, detector);
+        // Per-photo cache context (same stats object, this photo's uri) + hard timeout so a
+        // hung native call on a malformed image can't wedge this worker forever.
+        const faces = await withTimeout(
+          embedImage(work.path, embedder!, spec, align, settings.minFaceSize, sink, detector!, {
+            ...cacheCtx,
+            uri,
+          }),
+          PER_PHOTO_TIMEOUT_MS,
+          'embedImage',
+        );
+        faceCount = faces.length;
+        const sim0 = now();
         for (const f of faces) {
           facesFound += 1;
           const simBaby = babyRefs.length ? maxSim(f.embedding, babyRefs) : -1;
@@ -194,6 +291,10 @@ export async function runScan(params: RunScanParams): Promise<ScanRun> {
           }
           const bucket: RefBucket = simBaby >= simParent ? 'baby' : 'parent';
           const sim = Math.max(simBaby, simParent);
+          if (sim > bestSim) {
+            bestSim = sim;
+            bestBucket = bucket;
+          }
           if (sim >= settings.threshold) {
             matches.push({
               uri,
@@ -205,22 +306,49 @@ export async function runScan(params: RunScanParams): Promise<ScanRun> {
             });
           }
         }
+        if (faces.length) sink.similarity.push(now() - sim0);
+        // Small thumbnail for the live grid, made from the downscaled working image while
+        // it still exists (cleanup runs in `finally`). Best-effort — never blocks a photo.
+        thumbUri = await makeThumb(work.path, i);
       } catch {
         // Unreadable / undecodable photo — skip it.
       } finally {
+        await work.cleanup();
         await norm.cleanup();
       }
+      done.add(i);
       processed += 1;
+      sink.total.push(now() - t0);
 
-      if (i % 3 === 0 || i === total - 1) {
+      if (processed % CHECKPOINT_EVERY === 0) onCheckpoint?.(snapshot());
+
+      const matched = bestSim >= settings.threshold;
+      onPhoto?.({
+        index: i,
+        uri,
+        thumbUri,
+        faceCount,
+        matched,
+        bucket: matched ? bestBucket : undefined,
+        similarity: bestSim,
+        ms: now() - t0,
+      });
+
+      if (processed % 3 === 0 || processed === total) {
         emit('scanning', `Scanning ${processed}/${total}…`, 0.05 + 0.95 * (processed / Math.max(1, total)), {
           photoIndex: processed,
           facesFound,
           matchesSoFar: matches.length,
+          liveStages: liveStages(),
         });
-        await new Promise<void>(r => setTimeout(r, 0)); // yield to keep UI responsive
       }
-    }
+
+      // Breathe: hand the JS thread back to the UI if we've held it past the frame budget.
+      await frame.tick();
+    };
+
+    await runPool(total, concurrency, scanPhoto, () => shouldCancel?.() ?? false);
+    onCheckpoint?.(snapshot()); // capture final state (matters on cancel / interruption)
 
     matches.sort((a, b) => b.similarity - a.similarity);
     const durationMs = now() - wall0;
@@ -246,12 +374,16 @@ export async function runScan(params: RunScanParams): Promise<ScanRun> {
       avgMsPerPhoto: processed ? durationMs / processed : 0,
       facesPerSec: durationMs > 0 ? facesFound / (durationMs / 1000) : 0,
       stages: {
+        decode: summarize(sink.decode),
         detect: summarize(sink.detect),
         crop: summarize(sink.crop),
         preprocess: summarize(sink.preprocess),
         infer: summarize(sink.infer),
+        similarity: summarize(sink.similarity),
+        total: summarize(sink.total),
       },
       separation: sepCount ? sepSum / sepCount : 0,
+      cacheStats,
     };
   } catch (err) {
     if (embedder) await embedder.release().catch(() => {});
