@@ -12,7 +12,15 @@
  * a smooth-but-slower scan beats a fast-but-janky one on the weak devices we care about.
  */
 
+import { Platform } from 'react-native';
+
 let cached: number | null = null;
+
+/** Android heap is far tighter than iOS, and each in-flight photo holds native bitmaps across
+ *  decode → detect → crop. Past this many concurrent photos the app OOM-crashes regardless of
+ *  the chosen level, so we clamp the effective concurrency on Android (iOS is unrestricted).
+ *  largeHeap is also enabled in the manifest for extra headroom. */
+const ANDROID_MAX_CONCURRENCY = 8;
 
 function benchmarkMs(): number {
   const t0 = Date.now();
@@ -30,18 +38,26 @@ export function recommendedConcurrency(): number {
   if (cached != null) return cached;
   const ms = benchmarkMs();
   let c: number;
-  // Capped at 4: beyond that the gain is small but in-flight memory (temp files + decoded
-  // buffers) and native ImageEditor contention grow, which on heavy arcface models causes
-  // GC stalls. Pick a higher level manually if your device proves it can take it.
-  if (ms < 25) c = 4; // fast / flagship
-  else if (ms < 60) c = 3; // mid-range
+  // Now that per-photo JS work is small (decode is lazy/cached; detect + crop are native and
+  // overlap across workers), throughput is gated by how many native stages run at once — so a
+  // higher cap helps. The remaining risk at high concurrency is in-flight memory (temp files +
+  // decoded buffers) and GC churn on heavy arcface models; the live health meter flags it, and
+  // the user can dial it down. Low-end devices stay conservative.
+  if (ms < 25) c = 6; // fast / flagship
+  else if (ms < 60) c = 4; // mid-range
   else c = 2; // low-end — stay smooth
   cached = c;
   console.log(`[FML] device JS bench ${ms}ms → auto concurrency ×${c}`);
   return c;
 }
 
-/** Resolve a settings value (0 = Auto) to an effective concurrency. */
+/** Resolve a settings value (0 = Auto) to an effective concurrency, clamped on Android to a
+ *  memory-safe ceiling so the high experimental levels (×10–×20) don't OOM the device. */
 export function resolveConcurrency(setting: number): number {
-  return setting > 0 ? setting : recommendedConcurrency();
+  const c = setting > 0 ? setting : recommendedConcurrency();
+  if (Platform.OS === 'android' && c > ANDROID_MAX_CONCURRENCY) {
+    console.log(`[FML] clamping concurrency ×${c} → ×${ANDROID_MAX_CONCURRENCY} (Android memory)`);
+    return ANDROID_MAX_CONCURRENCY;
+  }
+  return c;
 }

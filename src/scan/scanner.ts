@@ -13,7 +13,7 @@ import { createDetector, type Detector } from '../pipeline/detector';
 import { embedImage, emptySink, type EmbedCacheCtx, type TimingSink } from './embedFace';
 import { normalizeUri } from '../pipeline/normalizeUri';
 import { downscaleForScan } from '../pipeline/downscale';
-import { clearThumbs, makeThumb } from '../pipeline/thumbnail';
+import { makeThumb } from '../pipeline/thumbnail';
 import { cosineSimilarity } from '../pipeline/similarity';
 import { runPool, withTimeout } from './concurrency';
 import { emptyCacheStats, setCacheEnabled } from './scanCache';
@@ -92,7 +92,7 @@ async function buildRefs(
       ? { path: norm.path, cleanup: async () => {} }
       : await downscaleForScan(norm.path, maxImageDim);
     try {
-      const faces = await embedImage(work.path, embedder, spec, align, minFaceSize, sink, detector);
+      const faces = await embedImage(async () => work.path, embedder, spec, align, minFaceSize, sink, detector);
       counts[ref.uri] = faces.length;
       if (faces.length) {
         // Primary subject = largest face (matches rnbaby's reference convention).
@@ -177,7 +177,7 @@ export async function runScan(params: RunScanParams): Promise<ScanRun> {
 
   try {
     emit('loading', `Loading ${spec.label}…`, 0);
-    embedder = await createEmbedder(spec);
+    embedder = await createEmbedder(spec, { iosBackends: settings.iosBackends });
     detector = await createDetector(settings.detector, { accurate: !settings.fastDetect });
     const loadMs = embedder.loadMs;
     const fileSizeBytes = embedder.fileSizeBytes;
@@ -240,7 +240,6 @@ export async function runScan(params: RunScanParams): Promise<ScanRun> {
     // Cross-run cache: reuse detection + crops (model-agnostic) so reruns with other models
     // skip those stages. Stats let Results show the warm-rerun speed-up.
     setCacheEnabled(settings.reuseCache);
-    await clearThumbs(); // fresh live-grid thumbnails for this scan
     const cacheStats = emptyCacheStats();
     const cacheCtx: EmbedCacheCtx = {
       // detectorKind drives the cache key; the ML Kit fast/accurate mode changes which faces
@@ -260,19 +259,37 @@ export async function runScan(params: RunScanParams): Promise<ScanRun> {
       let bestSim = -1;
       let bestBucket: RefBucket = 'baby';
       let thumbUri: string | undefined;
-      const dec0 = now();
-      // Ask the source for an already-downscaled copy (iOS PhotoKit); only fall back to a
-      // separate ImageEditor downscale when it didn't (Android content://, local files).
-      const norm = await normalizeUri(uri, settings.maxImageDim);
-      const work = norm.downscaled
-        ? { path: norm.path, cleanup: async () => {} }
-        : await downscaleForScan(norm.path, settings.maxImageDim);
-      sink.decode.push(now() - dec0);
+
+      // Lazy, memoized decode: the working image is produced only the first time something
+      // actually needs it (a detection or crop cache MISS, or a missing thumbnail). On a warm
+      // rerun where detection + every crop hit and the thumbnail exists, this never runs — so
+      // the biggest per-photo stage (decode, ~230-320ms) is skipped entirely.
+      let decoded: { path: string; cleanup: () => Promise<void> } | undefined;
+      const getWork = async (): Promise<string> => {
+        if (decoded) return decoded.path;
+        const dec0 = now();
+        // Ask the source for an already-downscaled copy (iOS PhotoKit); only fall back to a
+        // separate ImageEditor downscale when it didn't (Android content://, local files).
+        const norm = await normalizeUri(uri, settings.maxImageDim);
+        const work = norm.downscaled
+          ? { path: norm.path, cleanup: async () => {} }
+          : await downscaleForScan(norm.path, settings.maxImageDim);
+        decoded = {
+          path: work.path,
+          cleanup: async () => {
+            await work.cleanup();
+            await norm.cleanup();
+          },
+        };
+        sink.decode.push(now() - dec0);
+        return decoded.path;
+      };
+
       try {
         // Per-photo cache context (same stats object, this photo's uri) + hard timeout so a
         // hung native call on a malformed image can't wedge this worker forever.
         const faces = await withTimeout(
-          embedImage(work.path, embedder!, spec, align, settings.minFaceSize, sink, detector!, {
+          embedImage(getWork, embedder!, spec, align, settings.minFaceSize, sink, detector!, {
             ...cacheCtx,
             uri,
           }),
@@ -307,14 +324,13 @@ export async function runScan(params: RunScanParams): Promise<ScanRun> {
           }
         }
         if (faces.length) sink.similarity.push(now() - sim0);
-        // Small thumbnail for the live grid, made from the downscaled working image while
-        // it still exists (cleanup runs in `finally`). Best-effort — never blocks a photo.
-        thumbUri = await makeThumb(work.path, i);
+        // Small thumbnail for the live grid. Cached by photo uri across runs, so a rerun
+        // reuses it without decoding; only a first encounter calls getWork. Best-effort.
+        thumbUri = await makeThumb(uri, getWork);
       } catch {
         // Unreadable / undecodable photo — skip it.
       } finally {
-        await work.cleanup();
-        await norm.cleanup();
+        if (decoded) await decoded.cleanup();
       }
       done.add(i);
       processed += 1;
@@ -347,7 +363,11 @@ export async function runScan(params: RunScanParams): Promise<ScanRun> {
       await frame.tick();
     };
 
-    await runPool(total, concurrency, scanPhoto, () => shouldCancel?.() ?? false);
+    // Optional time-budget: stop pulling new photos once the limit elapses (throughput test).
+    // In-flight photos finish; the result reports how many were scanned in the window + faces/s.
+    const deadline = settings.scanTimeLimitSec > 0 ? wall0 + settings.scanTimeLimitSec * 1000 : Infinity;
+    const stop = () => (shouldCancel?.() ?? false) || now() >= deadline;
+    await runPool(total, concurrency, scanPhoto, stop);
     onCheckpoint?.(snapshot()); // capture final state (matters on cancel / interruption)
 
     matches.sort((a, b) => b.similarity - a.similarity);

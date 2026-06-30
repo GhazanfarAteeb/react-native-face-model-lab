@@ -17,7 +17,7 @@ import {
 import RNFS from 'react-native-fs';
 import { useStore } from '../scan/store';
 import { Badge, Button, Card, Muted, SectionLabel, Segmented, Stat } from './components';
-import { fmtBytes, fmtMedian, fmtMs } from './format';
+import { fmtBytes, fmtDuration, fmtMedian, fmtMs } from './format';
 import { theme, spacing, radius, mono } from './theme';
 import type { RefBucket, ScanRun } from '../types';
 
@@ -134,7 +134,9 @@ export default function ResultsScreen() {
             {run.modelLabel} · {run.detectorLabel}
           </SectionLabel>
           <View style={styles.headline}>
-            <Text style={styles.bigTime}>{fmtMs(run.durationMs)}</Text>
+            <Text style={styles.bigTime} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+              {fmtDuration(run.durationMs)}
+            </Text>
             <Text style={styles.bigTimeSub}>
               to scan {run.photosScanned} photos · {fmtMs(run.avgMsPerPhoto)}/photo
             </Text>

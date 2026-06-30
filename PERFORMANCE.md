@@ -39,6 +39,14 @@ So when you re-scan the same gallery with another model, only **preprocess (~7ms
 (~30ms)** re-run. The 337ms detect and 468ms crop are served from cache. Detection cache is
 unbounded (tiny); crop cache is a bounded LRU (~400 entries).
 
+**Decode is now lazy too.** The working image (`normalizeUri` + `downscaleForScan`, the
+*biggest* stage at ~230–320ms/photo) is produced only when something actually needs it — a
+detection or crop cache **miss**, or a missing thumbnail. On a fully-warm rerun nothing does,
+so decode is skipped entirely: per-photo cost collapses to preprocess + inference. Thumbnails
+are persisted keyed by photo uri (`thumbnail.ts`) so they're reused across runs instead of
+forcing a decode; they're wiped only by **Clear scan cache**. (Photos whose crops were evicted
+from the bounded LRU still decode — raise the cap or detection resolution if that bites.)
+
 ## How to measure performance in-app
 
 Everything you need to see the wins is on-screen:
@@ -70,6 +78,13 @@ Everything you need to see the wins is on-screen:
 - **Detection resolution** (Full / 1280 / 1600 / 2048): caps the image before detection — the
   biggest single-run speed-up; lower = faster detect.
 - **Reuse cache** (On/Off): cross-run reuse vs cold benchmarking.
+- **iOS inference backend** (multi-select CPU / CoreML, iOS only): defaults to **CPU**. ORT's
+  CoreML EP rarely engages the ANE for these small 112² models, so it ran on CPU anyway but paid
+  a ~1s session compile + per-call dispatch/partition overhead (model load 1.01s, embed 212ms on
+  iOS vs 229ms / 126ms on Android CPU). CPU drops both. Select **both** to enable the **ANE
+  hybrid**: ORT-CPU and a native CoreML/ANE embedder run in parallel, each pulling faces from a
+  shared queue (least-loaded routing → self-balancing). Needs the native module + a converted
+  `.mlpackage` — see `ANE_SETUP.md`; falls back to CPU until then.
 - **Alignment** (Model tab, spec/force-arcface/force-bbox): arcface = accurate + slow crop;
   bbox = fast crop, lower separation. Per-model default already set in the registry.
 

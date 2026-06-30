@@ -7,52 +7,54 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		08F6B7286F87A2914C7525EE /* facelivt_v1_s.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 7D54C895BE60D0CFBACDB063 /* facelivt_v1_s.onnx */; };
+		08FA2A072FF3FDFB0044CEF8 /* FaceCoreML.mm in Sources */ = {isa = PBXBuildFile; fileRef = 08FA2A062FF3FDFB0044CEF8 /* FaceCoreML.mm */; };
 		0C80B921A6F3F58F76C31292 /* libPods-FaceModelLab.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-FaceModelLab.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
-		398CFA7849B9F50248B9682B /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
-		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
-		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
-		5B76FE247AC50433F62E653A /* blazeface.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 0C3862212A9605C5487460D8 /* blazeface.onnx */; };
-		BF8F3F5482ED248AAD3F5699 /* edgeface_s_gamma_05.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 0AA1BB8DFC155551D2A96BFF /* edgeface_s_gamma_05.onnx */; };
-		7C4A260BFF6E6497A7CA19F5 /* facelivt_v1_m.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 820FE52945E86021AC4FF6AB /* facelivt_v1_m.onnx */; };
-		08F6B7286F87A2914C7525EE /* facelivt_v1_s.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 7D54C895BE60D0CFBACDB063 /* facelivt_v1_s.onnx */; };
-		4EEE1B87B1D64F19F83A55D0 /* facelivt_v2_l.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 3B1D8EAEC0D4DB0877A28947 /* facelivt_v2_l.onnx */; };
 		32DF101621FF1E30E07BDF66 /* facelivt_v2_m.onnx in Resources */ = {isa = PBXBuildFile; fileRef = E9F1D2537AECBDDF5136F171 /* facelivt_v2_m.onnx */; };
-		B8EE904FA500CCFEF13A924D /* facelivt_v2_s.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 0BBEE0198F0A0CC1A8D85B07 /* facelivt_v2_s.onnx */; };
-		4008DA35D0833F8F6491F587 /* facelivt_v2_xs.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 4E7C5E39C5473BCEBB84A88F /* facelivt_v2_xs.onnx */; };
-		93AF0F63AA46AFE029207A9C /* facenet.onnx in Resources */ = {isa = PBXBuildFile; fileRef = E8E70123AD31D5450BE7D75E /* facenet.onnx */; };
-		867E0ACD3D36F12F78DF3008 /* ghostfacenet_v2.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 1695A5575EB812593E2F64E4 /* ghostfacenet_v2.onnx */; };
+		398CFA7849B9F50248B9682B /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
 		3D699E760EF8AECD107252F7 /* mobilefacenet.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 3669D06AE96B4806B25C4AEF /* mobilefacenet.onnx */; };
-		8F4302A142AE2E7DF92E11F6 /* scrfd_640.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 6E2EE09872286EB0E4563F4D /* scrfd_640.onnx */; };
+		4008DA35D0833F8F6491F587 /* facelivt_v2_xs.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 4E7C5E39C5473BCEBB84A88F /* facelivt_v2_xs.onnx */; };
 		41000BB825439A24A45F7EF7 /* sface_2021dec.onnx in Resources */ = {isa = PBXBuildFile; fileRef = E50BD28A10019F27FB3DA8D9 /* sface_2021dec.onnx */; };
+		4EEE1B87B1D64F19F83A55D0 /* facelivt_v2_l.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 3B1D8EAEC0D4DB0877A28947 /* facelivt_v2_l.onnx */; };
 		515EEE5255858D9BFF89FDE3 /* yunet_2023mar.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 039F8792DADEB3CADF2AF204 /* yunet_2023mar.onnx */; };
+		5B76FE247AC50433F62E653A /* blazeface.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 0C3862212A9605C5487460D8 /* blazeface.onnx */; };
+		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
+		7C4A260BFF6E6497A7CA19F5 /* facelivt_v1_m.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 820FE52945E86021AC4FF6AB /* facelivt_v1_m.onnx */; };
+		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
+		867E0ACD3D36F12F78DF3008 /* ghostfacenet_v2.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 1695A5575EB812593E2F64E4 /* ghostfacenet_v2.onnx */; };
+		8F4302A142AE2E7DF92E11F6 /* scrfd_640.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 6E2EE09872286EB0E4563F4D /* scrfd_640.onnx */; };
+		93AF0F63AA46AFE029207A9C /* facenet.onnx in Resources */ = {isa = PBXBuildFile; fileRef = E8E70123AD31D5450BE7D75E /* facenet.onnx */; };
+		B8EE904FA500CCFEF13A924D /* facelivt_v2_s.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 0BBEE0198F0A0CC1A8D85B07 /* facelivt_v2_s.onnx */; };
+		BF8F3F5482ED248AAD3F5699 /* edgeface_s_gamma_05.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 0AA1BB8DFC155551D2A96BFF /* edgeface_s_gamma_05.onnx */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		039F8792DADEB3CADF2AF204 /* yunet_2023mar.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = yunet_2023mar.onnx; path = FaceModelLab/yunet_2023mar.onnx; sourceTree = "<group>"; };
+		08FA2A062FF3FDFB0044CEF8 /* FaceCoreML.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = FaceCoreML.mm; sourceTree = "<group>"; };
+		0AA1BB8DFC155551D2A96BFF /* edgeface_s_gamma_05.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = edgeface_s_gamma_05.onnx; path = FaceModelLab/edgeface_s_gamma_05.onnx; sourceTree = "<group>"; };
+		0BBEE0198F0A0CC1A8D85B07 /* facelivt_v2_s.onnx */ = {isa = PBXFileReference; lastKnownFileType = text; name = facelivt_v2_s.onnx; path = FaceModelLab/facelivt_v2_s.onnx; sourceTree = "<group>"; };
+		0C3862212A9605C5487460D8 /* blazeface.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = blazeface.onnx; path = FaceModelLab/blazeface.onnx; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* FaceModelLab.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FaceModelLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = FaceModelLab/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = FaceModelLab/Info.plist; sourceTree = "<group>"; };
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = FaceModelLab/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		1695A5575EB812593E2F64E4 /* ghostfacenet_v2.onnx */ = {isa = PBXFileReference; lastKnownFileType = text; name = ghostfacenet_v2.onnx; path = FaceModelLab/ghostfacenet_v2.onnx; sourceTree = "<group>"; };
+		3669D06AE96B4806B25C4AEF /* mobilefacenet.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = mobilefacenet.onnx; path = FaceModelLab/mobilefacenet.onnx; sourceTree = "<group>"; };
+		3B1D8EAEC0D4DB0877A28947 /* facelivt_v2_l.onnx */ = {isa = PBXFileReference; lastKnownFileType = text; name = facelivt_v2_l.onnx; path = FaceModelLab/facelivt_v2_l.onnx; sourceTree = "<group>"; };
 		3B4392A12AC88292D35C810B /* Pods-FaceModelLab.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-FaceModelLab.debug.xcconfig"; path = "Target Support Files/Pods-FaceModelLab/Pods-FaceModelLab.debug.xcconfig"; sourceTree = "<group>"; };
+		4E7C5E39C5473BCEBB84A88F /* facelivt_v2_xs.onnx */ = {isa = PBXFileReference; lastKnownFileType = text; name = facelivt_v2_xs.onnx; path = FaceModelLab/facelivt_v2_xs.onnx; sourceTree = "<group>"; };
 		5709B34CF0A7D63546082F79 /* Pods-FaceModelLab.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-FaceModelLab.release.xcconfig"; path = "Target Support Files/Pods-FaceModelLab/Pods-FaceModelLab.release.xcconfig"; sourceTree = "<group>"; };
 		5DCACB8F33CDC322A6C60F78 /* libPods-FaceModelLab.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-FaceModelLab.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = FaceModelLab/AppDelegate.swift; sourceTree = "<group>"; };
-		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = FaceModelLab/LaunchScreen.storyboard; sourceTree = "<group>"; };
-		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
-		0C3862212A9605C5487460D8 /* blazeface.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = blazeface.onnx; path = FaceModelLab/blazeface.onnx; sourceTree = "<group>"; };
-		0AA1BB8DFC155551D2A96BFF /* edgeface_s_gamma_05.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = edgeface_s_gamma_05.onnx; path = FaceModelLab/edgeface_s_gamma_05.onnx; sourceTree = "<group>"; };
-		820FE52945E86021AC4FF6AB /* facelivt_v1_m.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = facelivt_v1_m.onnx; path = FaceModelLab/facelivt_v1_m.onnx; sourceTree = "<group>"; };
-		7D54C895BE60D0CFBACDB063 /* facelivt_v1_s.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = facelivt_v1_s.onnx; path = FaceModelLab/facelivt_v1_s.onnx; sourceTree = "<group>"; };
-		3B1D8EAEC0D4DB0877A28947 /* facelivt_v2_l.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = facelivt_v2_l.onnx; path = FaceModelLab/facelivt_v2_l.onnx; sourceTree = "<group>"; };
-		E9F1D2537AECBDDF5136F171 /* facelivt_v2_m.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = facelivt_v2_m.onnx; path = FaceModelLab/facelivt_v2_m.onnx; sourceTree = "<group>"; };
-		0BBEE0198F0A0CC1A8D85B07 /* facelivt_v2_s.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = facelivt_v2_s.onnx; path = FaceModelLab/facelivt_v2_s.onnx; sourceTree = "<group>"; };
-		4E7C5E39C5473BCEBB84A88F /* facelivt_v2_xs.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = facelivt_v2_xs.onnx; path = FaceModelLab/facelivt_v2_xs.onnx; sourceTree = "<group>"; };
-		E8E70123AD31D5450BE7D75E /* facenet.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = facenet.onnx; path = FaceModelLab/facenet.onnx; sourceTree = "<group>"; };
-		1695A5575EB812593E2F64E4 /* ghostfacenet_v2.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = ghostfacenet_v2.onnx; path = FaceModelLab/ghostfacenet_v2.onnx; sourceTree = "<group>"; };
-		3669D06AE96B4806B25C4AEF /* mobilefacenet.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = mobilefacenet.onnx; path = FaceModelLab/mobilefacenet.onnx; sourceTree = "<group>"; };
 		6E2EE09872286EB0E4563F4D /* scrfd_640.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = scrfd_640.onnx; path = FaceModelLab/scrfd_640.onnx; sourceTree = "<group>"; };
+		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = FaceModelLab/AppDelegate.swift; sourceTree = "<group>"; };
+		7D54C895BE60D0CFBACDB063 /* facelivt_v1_s.onnx */ = {isa = PBXFileReference; lastKnownFileType = text; name = facelivt_v1_s.onnx; path = FaceModelLab/facelivt_v1_s.onnx; sourceTree = "<group>"; };
+		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = FaceModelLab/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		820FE52945E86021AC4FF6AB /* facelivt_v1_m.onnx */ = {isa = PBXFileReference; lastKnownFileType = text; name = facelivt_v1_m.onnx; path = FaceModelLab/facelivt_v1_m.onnx; sourceTree = "<group>"; };
 		E50BD28A10019F27FB3DA8D9 /* sface_2021dec.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = sface_2021dec.onnx; path = FaceModelLab/sface_2021dec.onnx; sourceTree = "<group>"; };
-		039F8792DADEB3CADF2AF204 /* yunet_2023mar.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = yunet_2023mar.onnx; path = FaceModelLab/yunet_2023mar.onnx; sourceTree = "<group>"; };
+		E8E70123AD31D5450BE7D75E /* facenet.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = facenet.onnx; path = FaceModelLab/facenet.onnx; sourceTree = "<group>"; };
+		E9F1D2537AECBDDF5136F171 /* facelivt_v2_m.onnx */ = {isa = PBXFileReference; lastKnownFileType = text; name = facelivt_v2_m.onnx; path = FaceModelLab/facelivt_v2_m.onnx; sourceTree = "<group>"; };
+		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -112,6 +114,7 @@
 		83CBB9F61A601CBA00E9B192 = {
 			isa = PBXGroup;
 			children = (
+				08FA2A062FF3FDFB0044CEF8 /* FaceCoreML.mm */,
 				13B07FAE1A68108700A75B9A /* FaceModelLab */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
@@ -173,7 +176,7 @@
 				LastUpgradeCheck = 1210;
 				TargetAttributes = {
 					13B07F861A680F5B00A75B9A = {
-						LastSwiftMigration = 1120;
+						LastSwiftMigration = 2660;
 					};
 				};
 			};
@@ -310,6 +313,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				08FA2A072FF3FDFB0044CEF8 /* FaceCoreML.mm in Sources */,
 				761780ED2CA45674006654EE /* AppDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

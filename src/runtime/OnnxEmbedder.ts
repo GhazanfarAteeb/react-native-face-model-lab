@@ -1,17 +1,24 @@
 /**
  * OnnxEmbedder — onnxruntime-react-native backend.
  *
- * Prefers the platform accelerator (CoreML on iOS, NNAPI/XNNPACK on Android) with a
- * CPU fallback, matching rnbaby's FaceEmbeddingService. Inference is sequential here
- * (one face at a time), so we don't need rnbaby's serial queue — but we DO copy the
- * output out of ORT's reused buffer before returning, and never dispose tensors.
+ * Runs the embedding model on ORT's CPU provider (default) or, on iOS, the CoreML execution
+ * provider. Inference is serialized through the shared `ortLock` together with the ONNX
+ * detectors: concurrent `session.run` calls on the ORT-RN bridge have a SIGABRT history on
+ * this project. The native CoreMLEmbedder is a separate runtime and does NOT take this lock,
+ * so ORT-CPU and CoreML/ANE can run in parallel (the HybridEmbedder relies on that). We copy
+ * the output out of ORT's reused buffer before returning, and never dispose tensors.
  */
 import * as ort from 'onnxruntime-react-native';
-import { Platform } from 'react-native';
 import type { ModelSpec } from '../types';
-import type { Embedder } from './Embedder';
+import type { Embedder, InferResult } from './Embedder';
+import { ortLock } from './ortLock';
 import { ensureModelFile, modelFileSize } from './modelAssets';
 import { now } from '../bench/timing';
+
+export interface OnnxEmbedderOptions {
+  /** 'cpu' (default everywhere) or 'coreml' (iOS only — adds the CoreML EP ahead of CPU). */
+  executionProvider?: 'cpu' | 'coreml';
+}
 
 export class OnnxEmbedder implements Embedder {
   private constructor(
@@ -24,16 +31,17 @@ export class OnnxEmbedder implements Embedder {
     private shape: number[],
   ) {}
 
-  static async create(spec: ModelSpec): Promise<OnnxEmbedder> {
+  static async create(spec: ModelSpec, opts?: OnnxEmbedderOptions): Promise<OnnxEmbedder> {
     const path = await ensureModelFile(spec);
     const fileSizeBytes = await modelFileSize(spec);
     const t0 = now();
 
-    // Android: CPU only. Accelerator EPs (NNAPI, and even XNNPACK on some graphs) can
-    // hard-abort (SIGABRT, uncatchable by JS) inside ORT session creation when they fail
-    // to compile a model — crashing the whole app. CPU never does. iOS keeps CoreML + CPU.
-    console.log('[FML] loading ONNX embedder:', spec.id, path);
-    const providers = Platform.OS === 'ios' ? ['coreml', 'cpu'] : ['cpu'];
+    // CoreML EP is requested only when explicitly asked for (iOS hybrid/coreml-only). It rarely
+    // engages the ANE for these small models and adds a ~1s compile + per-call overhead, so CPU
+    // is the default. Android always lands on CPU (accelerator EPs can hard-abort here).
+    const useCoreml = opts?.executionProvider === 'coreml';
+    const providers = useCoreml ? ['coreml', 'cpu'] : ['cpu'];
+    console.log('[FML] loading ONNX embedder:', spec.id, 'providers:', providers.join('+'), path);
     let session: ort.InferenceSession;
     try {
       session = await ort.InferenceSession.create(path, {
@@ -53,14 +61,18 @@ export class OnnxEmbedder implements Embedder {
     return new OnnxEmbedder(spec, loadMs, fileSizeBytes, session, inputName, outputName, shape);
   }
 
-  async infer(input: Float32Array): Promise<Float32Array> {
-    const tensor = new ort.Tensor('float32', input, this.shape);
-    const output = await this.session.run({ [this.inputName]: tensor });
-    const raw = output[this.outputName].data as Float32Array;
-    // ORT reuses the output buffer across runs — copy before the next call.
-    const copy = new Float32Array(raw.length);
-    copy.set(raw);
-    return copy;
+  async infer(input: Float32Array): Promise<InferResult> {
+    // Serialize on the shared ORT lock; measure only the compute (lock wait stays outside).
+    return ortLock.run(async () => {
+      const t0 = now();
+      const tensor = new ort.Tensor('float32', input, this.shape);
+      const output = await this.session.run({ [this.inputName]: tensor });
+      const raw = output[this.outputName].data as Float32Array;
+      // ORT reuses the output buffer across runs — copy before the next call.
+      const copy = new Float32Array(raw.length);
+      copy.set(raw);
+      return { data: copy, computeMs: now() - t0 };
+    });
   }
 
   async release(): Promise<void> {

@@ -15,6 +15,7 @@ import {
   type ScanProgressState,
 } from './checkpoint';
 import { cacheSizes, clearScanCache } from './scanCache';
+import { clearThumbs } from '../pipeline/thumbnail';
 import type {
   ModelSpec,
   RefBucket,
@@ -27,6 +28,7 @@ import type {
 
 const DEFAULT_SETTINGS: ScanSettings = {
   maxPhotos: 200,
+  scanTimeLimitSec: 0, // 0 = scan all selected photos; >0 = stop after N seconds (throughput test)
   threshold: 0.5,
   align: 'spec',
   minFaceSize: 40,
@@ -35,6 +37,7 @@ const DEFAULT_SETTINGS: ScanSettings = {
   maxImageDim: 1600, // cap working resolution for faster detection
   reuseCache: true, // reuse detection + crops across runs (benchmark re-scans)
   fastDetect: false, // ML Kit accurate mode by default
+  iosBackends: ['cpu'], // CPU beats the (non-ANE) CoreML EP; select both for ANE hybrid
 };
 
 function dedupe(items: ReferenceImage[]): ReferenceImage[] {
@@ -270,7 +273,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     resumeScan,
     cancelScan,
     clearRuns,
-    clearCache: clearScanCache,
+    // Clearing the benchmark cache also wipes the persisted thumbnails (they're keyed by
+    // photo and reused across runs); fire-and-forget so the UI gets sizes synchronously.
+    clearCache: () => {
+      const sizes = clearScanCache();
+      clearThumbs().catch(() => {});
+      return sizes;
+    },
     cacheSizes,
   };
 

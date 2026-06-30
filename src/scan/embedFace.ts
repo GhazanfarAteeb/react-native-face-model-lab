@@ -7,7 +7,6 @@
 import { cropFace } from '../pipeline/crop';
 import { getImageProcessor } from '../pipeline/processor';
 import { l2Normalize } from '../pipeline/similarity';
-import { ortLock } from '../runtime/ortLock';
 import {
   type CacheStats,
   cropKey,
@@ -53,7 +52,7 @@ export interface EmbedCacheCtx {
 }
 
 export async function embedImage(
-  path: string,
+  getWork: () => Promise<string>,
   embedder: Embedder,
   spec: ModelSpec,
   align: AlignMode,
@@ -63,6 +62,8 @@ export async function embedImage(
   cache?: EmbedCacheCtx,
 ): Promise<FaceEmbedding[]> {
   // ── Detection (model-agnostic → reused across every model) ──
+  // `getWork` decodes/downscales the photo lazily, so a fully-cached photo (detection +
+  // every crop hit) never touches it — the biggest stage (decode) is skipped on warm reruns.
   let det;
   const dKey = cache ? detectKey(cache.uri, cache.detectorKind, cache.maxImageDim) : undefined;
   const cachedDet = dKey ? getDetection(dKey) : undefined;
@@ -70,6 +71,7 @@ export async function embedImage(
     det = cachedDet;
     cache!.stats.detectHits += 1;
   } else {
+    const path = await getWork();
     const t0 = now();
     det = await detector.detect(path, minFaceSize);
     sink.detect.push(now() - t0);
@@ -92,6 +94,7 @@ export async function embedImage(
       rgba = cachedCrop;
       cache!.stats.cropHits += 1;
     } else {
+      const path = await getWork();
       const c0 = now();
       rgba = await cropFace(path, face.box, face.landmarks, det.imageWidth, det.imageHeight, spec, align);
       sink.crop.push(now() - c0);
@@ -108,14 +111,11 @@ export async function embedImage(
     const input = await getImageProcessor().preprocess(rgba, spec);
     sink.preprocess.push(now() - p0);
 
-    // Serialize the actual inference (concurrent ORT runs can hard-abort). The lock
-    // wait sits OUTSIDE the timed region so stage timings reflect compute, not queueing.
-    const raw = await ortLock.run(async () => {
-      const i0 = now();
-      const r = await embedder.infer(input);
-      sink.infer.push(now() - i0);
-      return r;
-    });
+    // The embedder owns its own concurrency control (per-backend lock) and reports pure
+    // compute time, so the recorded "embed" stage excludes queue/lock wait. With the hybrid
+    // embedder this call may land on CPU or the ANE — whichever is free.
+    const { data: raw, computeMs } = await embedder.infer(input);
+    sink.infer.push(computeMs);
 
     out.push({
       embedding: l2Normalize(raw),

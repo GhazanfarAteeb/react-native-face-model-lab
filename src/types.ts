@@ -37,6 +37,10 @@ export interface ModelSpec {
   family: string;
   runtime: RuntimeKind;
   assetName: string;
+  /** iOS ANE: name of the CoreML model in the app bundle (a `.mlpackage`/`.mlmodelc`,
+   *  converted offline from the ONNX file). Present → this model can run on the Neural Engine
+   *  via the native CoreML embedder (hybrid mode). Absent → CPU/CoreML-EP only. */
+  coremlAsset?: string;
   /** True when shipped in the app bundle (loaded via require); else from <DocumentDir>/models. */
   bundled: boolean;
   input: { width: number; height: number; layout: TensorLayout; channels: ChannelOrder };
@@ -104,8 +108,11 @@ export interface ReferenceEmbedding {
 // ─── Scanning ────────────────────────────────────────────────────────────────
 
 export interface ScanSettings {
-  /** How many gallery photos to scan (most recent first). */
+  /** How many gallery photos to scan (most recent first). 0 = the whole gallery. */
   maxPhotos: number;
+  /** Stop the scan after this many seconds (0 = no time limit). A throughput benchmark: pair it
+   *  with a large/All photo count and read how many photos were scanned + faces/s in the result. */
+  scanTimeLimitSec: number;
   /** Cosine score at/above which a face counts as a "match" for a bucket. */
   threshold: number;
   /** 'spec' uses the model's preferred crop; force-* overrides it. */
@@ -126,6 +133,16 @@ export interface ScanSettings {
   reuseCache: boolean;
   /** ML Kit only: use the faster (lower-recall) detector instead of the accurate one. */
   fastDetect: boolean;
+  /** iOS only: which inference backend(s) to run the embedder on. No effect on Android
+   *  (always CPU — accelerator EPs have a SIGABRT history here).
+   *   • ['cpu']            → ORT CPU (default; fastest single path for these small models).
+   *   • ['coreml']         → ORT CoreML execution provider (benchmark the EP in isolation;
+   *                          note it rarely engages the ANE for 112² models).
+   *   • ['cpu','coreml']   → HYBRID: ORT-CPU and the native CoreML/ANE embedder run in
+   *                          parallel, each pulling faces from a shared queue (work-stealing).
+   *                          Requires the native CoreML module; falls back to CPU if absent.
+   *  Must contain at least one entry. */
+  iosBackends: Array<'cpu' | 'coreml'>;
 }
 
 /** A scanned face that matched a bucket. */

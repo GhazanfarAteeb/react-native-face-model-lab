@@ -29,6 +29,9 @@ function faceLivt(id: string, label: string, assetName: string, note: string): M
     family: 'FaceLiVT',
     runtime: 'onnx',
     assetName,
+    // ANE: enabled once scripts/onnx-to-coreml.py has produced this .mlpackage and it's been
+    // added to the Xcode target. Harmless before then — the hybrid path falls back to CPU.
+    coremlAsset: assetName.replace('.onnx', '.mlpackage'),
     bundled: true,
     input: { width: 112, height: 112, layout: 'NCHW', channels: 'RGB' },
     norm: { mean: 127.5, std: 127.5 },
@@ -48,6 +51,9 @@ export const MODEL_REGISTRY: ModelSpec[] = [
     family: 'MobileFaceNet',
     runtime: 'onnx',
     assetName: 'mobilefacenet.onnx',
+    // ANE: convert first with `python scripts/onnx-to-coreml.py mobilefacenet`, add the
+    // .mlpackage to the Xcode target, then hybrid mode runs this on the Neural Engine.
+    coremlAsset: 'mobilefacenet.mlpackage',
     bundled: true,
     input: { width: 112, height: 112, layout: 'NCHW', channels: 'RGB' },
     norm: { mean: 127.5, std: 128.0 },

@@ -5,7 +5,7 @@
  *   • While scanning, the live ring + stats view; on finish, jumps to Results.
  */
 import React, { useCallback, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useStore } from '../scan/store';
 import { recentPhotoUris } from '../scan/gallery';
 import { Button, Card, Chip, Muted, SectionLabel } from './components';
@@ -80,6 +80,14 @@ export default function ScanScreen({ goToResults }: { goToResults: () => void })
     }
   }, [settings.maxPhotos, startScan, goToResults]);
 
+  // Toggle an iOS backend on/off, never leaving the set empty (one engine is always selected).
+  const toggleBackend = (b: 'cpu' | 'coreml') => {
+    const cur = settings.iosBackends;
+    const next = cur.includes(b) ? cur.filter(x => x !== b) : [...cur, b];
+    setSettings({ iosBackends: next.length ? next : [b] });
+  };
+  const hybrid = settings.iosBackends.includes('cpu') && settings.iosBackends.includes('coreml');
+
   // Live scan grid takes over the whole tab while a scan runs.
   if (scanning && progress) return <LiveScanScreen progress={progress} />;
 
@@ -119,10 +127,37 @@ export default function ScanScreen({ goToResults }: { goToResults: () => void })
       <Card>
         <SectionLabel>Photos to scan (max)</SectionLabel>
         <View style={styles.chipRow}>
-          {[50, 100, 200, 500, 1000].map(n => (
-            <Chip key={n} label={String(n)} active={settings.maxPhotos === n} onPress={() => setSettings({ maxPhotos: n })} />
+          {[
+            { n: 50, label: '50' },
+            { n: 100, label: '100' },
+            { n: 200, label: '200' },
+            { n: 500, label: '500' },
+            { n: 1000, label: '1000' },
+            { n: 0, label: 'All' },
+          ].map(o => (
+            <Chip key={o.n} label={o.label} active={settings.maxPhotos === o.n} onPress={() => setSettings({ maxPhotos: o.n })} />
           ))}
         </View>
+        <Muted>“All” scans your entire gallery — newest first. Large libraries take a while; the scan is resumable if interrupted.</Muted>
+        <SectionLabel>Scan time limit</SectionLabel>
+        <View style={styles.chipRow}>
+          {[
+            { n: 0, label: 'Off' },
+            { n: 60, label: '1m' },
+            { n: 120, label: '2m' },
+            { n: 300, label: '5m' },
+            { n: 420, label: '7m' },
+            { n: 600, label: '10m' },
+          ].map(o => (
+            <Chip
+              key={o.n}
+              label={o.label}
+              active={settings.scanTimeLimitSec === o.n}
+              onPress={() => setSettings({ scanTimeLimitSec: o.n })}
+            />
+          ))}
+        </View>
+        <Muted>Throughput test: stop after this long and see how many photos were scanned (and faces/s) in the result. Pair with a large count or “All”. “Off” scans the whole selection.</Muted>
         <SectionLabel>Match threshold (cosine)</SectionLabel>
         <View style={styles.stepper}>
           <Pressable style={styles.stepBtn} onPress={() => setSettings({ threshold: Math.max(0.1, +(settings.threshold - 0.05).toFixed(2)) })}>
@@ -136,7 +171,7 @@ export default function ScanScreen({ goToResults }: { goToResults: () => void })
         </View>
         <SectionLabel>Parallelism (scan speed)</SectionLabel>
         <View style={styles.chipRow}>
-          {[0, 1, 2, 3, 4, 6].map(n => (
+          {[0, 1, 2, 3, 4, 6, 8, 10, 12, 14, 16, 18, 20].map(n => (
             <Chip
               key={n}
               label={n === 0 ? 'Auto' : n === 1 ? '1 (off)' : `×${n}`}
@@ -145,7 +180,7 @@ export default function ScanScreen({ goToResults }: { goToResults: () => void })
             />
           ))}
         </View>
-        <Muted>Auto picks a level from a quick device benchmark. Higher overlaps more I/O & detection (faster) but uses more memory; inference stays serialized for stability.</Muted>
+        <Muted>Auto picks a level from a quick device benchmark. Higher overlaps more I/O & detection (faster) but uses more memory; inference stays serialized for stability. ×8 and above are for experimentation — watch the live health meter for jank/GC stalls and back off if it dips. On Android, levels above ×8 are capped to protect memory (it OOMs otherwise); iOS runs the full level.</Muted>
         <SectionLabel>Detection resolution</SectionLabel>
         <View style={styles.chipRow}>
           {[
@@ -170,6 +205,21 @@ export default function ScanScreen({ goToResults }: { goToResults: () => void })
           <Chip label="Off (cold)" active={!settings.reuseCache} onPress={() => setSettings({ reuseCache: false })} />
         </View>
         <Muted>Reuses detection & crops when re-scanning the same photos with another model — only inference re-runs. Turn off to measure cold cost.</Muted>
+        {Platform.OS === 'ios' ? (
+          <>
+            <SectionLabel>iOS inference backend{hybrid ? ' · ANE hybrid' : ''}</SectionLabel>
+            <View style={styles.chipRow}>
+              <Chip label="CPU" active={settings.iosBackends.includes('cpu')} onPress={() => toggleBackend('cpu')} />
+              <Chip label="CoreML" active={settings.iosBackends.includes('coreml')} onPress={() => toggleBackend('coreml')} />
+            </View>
+            <Muted>
+              Select one engine for a clean per-model benchmark (CPU is fastest for these small models; CoreML
+              benchmarks the ORT EP). Select <Text style={{ fontWeight: '700' }}>both</Text> to enable the ANE hybrid —
+              CPU and the native Neural-Engine embedder run in parallel, sharing the face queue. Hybrid needs the native
+              CoreML module + a converted model; until then it falls back to CPU.
+            </Muted>
+          </>
+        ) : null}
       </Card>
 
       {resumable ? (
