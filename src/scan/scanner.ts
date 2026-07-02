@@ -177,8 +177,8 @@ export async function runScan(params: RunScanParams): Promise<ScanRun> {
 
   try {
     emit('loading', `Loading ${spec.label}…`, 0);
-    embedder = await createEmbedder(spec, { iosBackends: settings.iosBackends });
-    detector = await createDetector(settings.detector, { accurate: !settings.fastDetect });
+    embedder = await createEmbedder(spec, { iosBackends: settings.iosBackends, androidBackend: settings.androidBackend });
+    detector = await createDetector(settings.detector, { accurate: !settings.fastDetect, androidBackend: settings.androidBackend });
     const loadMs = embedder.loadMs;
     const fileSizeBytes = embedder.fileSizeBytes;
 

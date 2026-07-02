@@ -31,16 +31,20 @@ export interface Embedder {
 }
 
 export interface EmbedderOptions {
-  /** iOS only: which backend(s) to use. Ignored on Android (always CPU). */
+  /** iOS only: which backend(s) to use. Ignored on Android (see androidBackend). */
   iosBackends?: Array<'cpu' | 'coreml'>;
+  /** Android only: 'cpu' (default) or 'nnapi' (GPU/NPU accelerator EP). Ignored on iOS. */
+  androidBackend?: 'cpu' | 'nnapi';
 }
 
 export async function createEmbedder(spec: ModelSpec, opts?: EmbedderOptions): Promise<Embedder> {
   const { OnnxEmbedder } = await import('./OnnxEmbedder');
   const backends = opts?.iosBackends?.length ? opts.iosBackends : ['cpu'];
 
-  // Android (or any non-iOS): always plain ORT CPU.
-  if (Platform.OS !== 'ios') return OnnxEmbedder.create(spec, { executionProvider: 'cpu' });
+  // Android (or any non-iOS): plain ORT CPU, or the NNAPI accelerator EP when opted in.
+  if (Platform.OS !== 'ios') {
+    return OnnxEmbedder.create(spec, { executionProvider: opts?.androidBackend === 'nnapi' ? 'nnapi' : 'cpu' });
+  }
 
   const wantCpu = backends.includes('cpu');
   const wantCoreml = backends.includes('coreml');

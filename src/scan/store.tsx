@@ -4,6 +4,7 @@
  * history of completed runs (so models can be compared across scans).
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { MODEL_REGISTRY } from '../models/registry';
 import { runScan } from './scanner';
 import {
@@ -16,6 +17,7 @@ import {
 } from './checkpoint';
 import { cacheSizes, clearScanCache } from './scanCache';
 import { clearThumbs } from '../pipeline/thumbnail';
+import { startBackgroundScan, updateBackgroundScan, stopBackgroundScan } from '../runtime/BackgroundScan';
 import type {
   ModelSpec,
   RefBucket,
@@ -38,12 +40,41 @@ const DEFAULT_SETTINGS: ScanSettings = {
   reuseCache: true, // reuse detection + crops across runs (benchmark re-scans)
   fastDetect: false, // ML Kit accurate mode by default
   iosBackends: ['cpu'], // CPU beats the (non-ANE) CoreML EP; select both for ANE hybrid
+  androidBackend: 'cpu', // CPU is always stable; 'nnapi' opts into the GPU/NPU accelerator EP
+  backgroundScan: true, // keep scanning when backgrounded (Android FGS) + auto-resume after a kill
 };
 
 function dedupe(items: ReferenceImage[]): ReferenceImage[] {
   const seen = new Set<string>();
   return items.filter(i => (seen.has(i.uri) ? false : (seen.add(i.uri), true)));
 }
+
+/** The resumable progress slice of a checkpoint (what runScan needs to continue). */
+function progressOf(cp: ScanCheckpoint): ScanProgressState {
+  return {
+    doneIndices: cp.doneIndices,
+    matches: cp.matches,
+    facesFound: cp.facesFound,
+    sepSum: cp.sepSum,
+    sepCount: cp.sepCount,
+  };
+}
+
+/** The scan config a checkpoint ran with, resolved back to a runnable form — or null for an
+ *  old-format checkpoint that didn't persist its config (then resume uses the current config). */
+function configOf(cp: ScanCheckpoint): { spec: ModelSpec; settings: ScanSettings; references: ReferenceImage[] } | null {
+  if (!cp.modelId || !cp.settings || !cp.references) return null;
+  const spec = MODEL_REGISTRY.find(m => m.id === cp.modelId);
+  if (!spec) return null;
+  return { spec, settings: cp.settings, references: cp.references };
+}
+
+function isIncomplete(cp: ScanCheckpoint): boolean {
+  return cp.doneIndices.length < cp.photoUris.length;
+}
+
+type ScanConfig = { spec: ModelSpec; settings: ScanSettings; references: ReferenceImage[] };
+type RunScanCore = (photoUris: string[], resume?: ScanProgressState, override?: ScanConfig) => Promise<ScanRun | null>;
 
 interface StoreValue {
   models: ModelSpec[];
@@ -103,11 +134,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const cpSaving = useRef(false);
   const cpPending = useRef<ScanCheckpoint | null>(null);
   const lastCp = useRef<ScanCheckpoint | null>(null);
-
-  // Look for an interrupted scan once on mount.
-  useEffect(() => {
-    loadCheckpoint().then(setSavedCp);
-  }, []);
+  // Refs so the mount + AppState listeners (registered once) always see the latest values.
+  const autoResumeTriedRef = useRef(false);
+  const scanningRef = useRef(scanning);
+  const savedCpRef = useRef<ScanCheckpoint | null>(savedCp);
+  const runScanCoreRef = useRef<RunScanCore | null>(null);
+  scanningRef.current = scanning;
+  savedCpRef.current = savedCp;
 
   const selectedModel = useMemo(
     () => MODEL_REGISTRY.find(m => m.id === selectedModelId) ?? MODEL_REGISTRY[0],
@@ -166,7 +199,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const runScanCore = useCallback(
-    async (photoUris: string[], resume?: ScanProgressState): Promise<ScanRun | null> => {
+    async (
+      photoUris: string[],
+      resume?: ScanProgressState,
+      override?: { spec: ModelSpec; settings: ScanSettings; references: ReferenceImage[] },
+    ): Promise<ScanRun | null> => {
       if (scanning) return null;
       cancelRef.current = false;
       liveEvents.current = [];
@@ -174,36 +211,78 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setScanning(true);
       setProgress(null);
 
-      const references = [...babyRefs, ...parentRefs];
-      const signature = signatureOf(selectedModel, settings, references);
+      // Resume-from-checkpoint passes the config the scan originally ran with (references, model,
+      // settings survive a cold start via the checkpoint); a fresh scan uses the current UI state.
+      const spec = override?.spec ?? selectedModel;
+      const activeSettings = override?.settings ?? settings;
+      const references = override?.references ?? [...babyRefs, ...parentRefs];
+      const signature = signatureOf(spec, activeSettings, references);
       const startedAt = Date.now();
+
+      // Keep the scan alive when backgrounded (Android foreground service; no-op on iOS / when the
+      // native module is absent) — only when the user opted into background scanning. Fire-and-
+      // forget so scanning starts without waiting on the notification-permission prompt.
+      if (activeSettings.backgroundScan) {
+        startBackgroundScan('Scanning photos', `Starting ${spec.label}…`).catch(() => {});
+      }
+      // Refresh the notification text on progress, throttled — Android rate-limits notifications.
+      let lastNotif = 0;
+      const notifyProgress = (p: ScanProgress) => {
+        const t = Date.now();
+        if (t - lastNotif < 1000) return;
+        lastNotif = t;
+        const text = p.photoCount
+          ? `${p.photoIndex}/${p.photoCount} photos · ${p.matchesSoFar} matches`
+          : p.message;
+        updateBackgroundScan(text);
+      };
+
       try {
         const run = await runScan({
-          spec: selectedModel,
+          spec,
           references,
           photoUris,
-          settings,
-          onProgress: setProgress,
+          settings: activeSettings,
+          onProgress: p => {
+            setProgress(p);
+            notifyProgress(p);
+          },
           onPhoto: pushLive,
           resume,
           onCheckpoint: state => {
-            const cp: ScanCheckpoint = { version: 1, signature, startedAt, photoUris, ...state };
+            // Persist the full config alongside progress so an OS-killed background scan can be
+            // reconstructed and auto-resumed on the next cold start (see attemptAutoResume).
+            const cp: ScanCheckpoint = {
+              version: 1,
+              signature,
+              startedAt,
+              photoUris,
+              modelId: spec.id,
+              settings: activeSettings,
+              references,
+              autoResumable: true,
+              ...state,
+            };
             lastCp.current = cp;
             queueCheckpoint(cp);
           },
           shouldCancel: () => cancelRef.current,
         });
         setRuns(prev => [run, ...prev]);
-        // Cancelled → keep the checkpoint so it can be resumed; finished/errored → drop it.
+        // Cancelled → keep the checkpoint so it can be resumed MANUALLY, but flag it so it is
+        // never AUTO-resumed on launch (the user chose to stop). Finished/errored → drop it.
         // Use the in-memory snapshot (race-free vs the async disk write).
         if (cancelRef.current && !run.error) {
-          setSavedCp(lastCp.current);
+          const finalCp = lastCp.current ? { ...lastCp.current, autoResumable: false } : null;
+          if (finalCp) await saveCheckpoint(finalCp);
+          setSavedCp(finalCp);
         } else {
           await clearCheckpoint();
           setSavedCp(null);
         }
         return run;
       } finally {
+        stopBackgroundScan(); // tear down the foreground service + wake lock
         setLiveVersion(v => v + 1); // flush any buffered tail
         setScanning(false);
       }
@@ -225,24 +304,69 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const resumeScan = useCallback(async (): Promise<ScanRun | null> => {
     const cp = savedCp;
     if (!cp) return null;
-    return runScanCore(cp.photoUris, {
-      doneIndices: cp.doneIndices,
-      matches: cp.matches,
-      facesFound: cp.facesFound,
-      sepSum: cp.sepSum,
-      sepCount: cp.sepCount,
-    });
+    // Prefer the checkpoint's own persisted config (survives a cold start); fall back to the
+    // current in-memory config for old-format checkpoints.
+    return runScanCore(cp.photoUris, progressOf(cp), configOf(cp) ?? undefined);
   }, [savedCp, runScanCore]);
 
-  // A checkpoint is resumable only if it matches the CURRENT config and isn't complete.
+  // A checkpoint is resumable if it isn't complete and we can reconstruct its config — either it
+  // persisted its own (new format, works after a cold start) or the current in-memory config
+  // still matches its signature (old format).
   const resumable = useMemo(() => {
-    if (!savedCp || scanning) return null;
-    const sig = signatureOf(selectedModel, settings, [...babyRefs, ...parentRefs]);
-    if (sig !== savedCp.signature) return null;
-    const done = savedCp.doneIndices.length;
-    if (done >= savedCp.photoUris.length) return null;
-    return { done, total: savedCp.photoUris.length };
+    if (!savedCp || scanning || !isIncomplete(savedCp)) return null;
+    const hasOwnConfig = configOf(savedCp) != null;
+    if (!hasOwnConfig) {
+      const sig = signatureOf(selectedModel, settings, [...babyRefs, ...parentRefs]);
+      if (sig !== savedCp.signature) return null;
+    }
+    return { done: savedCp.doneIndices.length, total: savedCp.photoUris.length };
   }, [savedCp, scanning, selectedModel, settings, babyRefs, parentRefs]);
+
+  runScanCoreRef.current = runScanCore;
+
+  // Put a killed background scan's config back into the UI so a resume shows the right refs/model.
+  const restoreFromCheckpoint = useCallback((cp: ScanCheckpoint) => {
+    if (cp.modelId) setSelectedModelId(cp.modelId);
+    if (cp.settings) setSettingsState(cp.settings);
+    if (cp.references) {
+      setBabyRefs(cp.references.filter(r => r.bucket === 'baby'));
+      setParentRefs(cp.references.filter(r => r.bucket === 'parent'));
+    }
+  }, []);
+
+  // Auto-resume an interrupted scan (OS-killed while backgrounded) once — on launch or when the
+  // app next returns to the foreground. Only for scans that opted into background mode and weren't
+  // explicitly cancelled; a user-cancelled scan stays behind the manual "Resume" card.
+  const attemptAutoResume = useCallback((cpArg?: ScanCheckpoint | null) => {
+    if (autoResumeTriedRef.current) return;
+    const cp = cpArg ?? savedCpRef.current;
+    if (!cp || scanningRef.current) return;
+    if (cp.autoResumable === false || !cp.settings?.backgroundScan || !isIncomplete(cp)) return;
+    const config = configOf(cp);
+    if (!config) return; // old-format checkpoint without persisted config → needs manual resume
+    autoResumeTriedRef.current = true;
+    runScanCoreRef.current?.(cp.photoUris, progressOf(cp), config).catch(() => {});
+  }, []);
+
+  // On launch: load any interrupted scan, restore its config into the UI, and auto-resume it if
+  // eligible (otherwise it waits behind the manual Resume card).
+  useEffect(() => {
+    loadCheckpoint().then(cp => {
+      setSavedCp(cp);
+      if (!cp) return;
+      if (configOf(cp)) restoreFromCheckpoint(cp);
+      attemptAutoResume(cp);
+    });
+  }, [restoreFromCheckpoint, attemptAutoResume]);
+
+  // Re-check on every return to the foreground — covers a checkpoint that loaded after mount, or a
+  // process the OS killed while backgrounded and relaunched into the foreground.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', s => {
+      if (s === 'active') attemptAutoResume();
+    });
+    return () => sub.remove();
+  }, [attemptAutoResume]);
 
   const cancelScan = useCallback(() => {
     cancelRef.current = true;

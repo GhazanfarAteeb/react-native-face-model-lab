@@ -28,6 +28,15 @@ export interface ScanCheckpoint extends ScanProgressState {
   signature: string;
   startedAt: number;
   photoUris: string[];
+  /** Full config the scan ran with, so it can be reconstructed after a cold start (references,
+   *  model, and settings are otherwise in-memory only). Absent on old checkpoints → resume falls
+   *  back to the current in-memory config. */
+  modelId?: string;
+  settings?: ScanSettings;
+  references?: ReferenceImage[];
+  /** false once the user explicitly cancels — still manually resumable, but never AUTO-resumed
+   *  on launch (we don't restart a scan the user chose to stop). Absent/true = eligible. */
+  autoResumable?: boolean;
 }
 
 /** A stable string over everything that affects WHICH faces match — anything not in here

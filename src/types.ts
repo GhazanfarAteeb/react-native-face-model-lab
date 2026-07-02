@@ -143,6 +143,19 @@ export interface ScanSettings {
    *                          Requires the native CoreML module; falls back to CPU if absent.
    *  Must contain at least one entry. */
   iosBackends: Array<'cpu' | 'coreml'>;
+  /** Android only: which ONNX Runtime execution provider to run the detector + embedder on.
+   *  No effect on iOS (see iosBackends there).
+   *   • 'cpu'   → ORT CPU (default; always stable).
+   *   • 'nnapi' → the NNAPI accelerator EP (device GPU / NPU / DSP), with a CPU fallback per
+   *               session. Faster on some devices, but accelerator EPs have a SIGABRT history
+   *               on this project — if a model can't load on NNAPI it falls back to CPU, but a
+   *               hard native abort during session creation is uncatchable, so treat this as an
+   *               experimental benchmark knob. */
+  androidBackend: 'cpu' | 'nnapi';
+  /** Android only: keep the scan running when the app is backgrounded / screen-off, via a
+   *  foreground service + wake lock (persistent notification). When on, an interrupted scan also
+   *  auto-resumes on the next launch. Off = scan only while the app is open. No effect on iOS. */
+  backgroundScan: boolean;
 }
 
 /** A scanned face that matched a bucket. */

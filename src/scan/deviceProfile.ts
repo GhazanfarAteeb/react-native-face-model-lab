@@ -16,11 +16,13 @@ import { Platform } from 'react-native';
 
 let cached: number | null = null;
 
-/** Android heap is far tighter than iOS, and each in-flight photo holds native bitmaps across
- *  decode → detect → crop. Past this many concurrent photos the app OOM-crashes regardless of
- *  the chosen level, so we clamp the effective concurrency on Android (iOS is unrestricted).
- *  largeHeap is also enabled in the manifest for extra headroom. */
-const ANDROID_MAX_CONCURRENCY = 8;
+/** Hard ceiling on Android concurrency. Android heap is far tighter than iOS, and each in-flight
+ *  photo holds native bitmaps across decode → detect → crop, so high levels risk OOM on weaker
+ *  devices (largeHeap is enabled in the manifest for extra headroom). This is intentionally set to
+ *  the maximum selectable level so the whole range is available for per-device benchmarking — the
+ *  user picks what fits; the live health meter flags memory pressure. It still bounds Auto and any
+ *  out-of-range value. */
+const ANDROID_MAX_CONCURRENCY = 50;
 
 function benchmarkMs(): number {
   const t0 = Date.now();

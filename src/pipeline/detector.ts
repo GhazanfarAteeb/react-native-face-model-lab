@@ -35,12 +35,21 @@ export type DetectorKind = 'mlkit' | 'yunet' | 'scrfd' | 'blazeface';
 export interface DetectorOptions {
   /** ML Kit only: accurate (default) vs fast performance mode. */
   accurate?: boolean;
+  /** ONNX detectors, Android only: 'cpu' (default) or 'nnapi' (GPU/NPU accelerator EP). */
+  androidBackend?: 'cpu' | 'nnapi';
+}
+
+/** Execution providers for an ONNX detector session on the current platform. iOS prefers the
+ *  CoreML EP; Android is CPU unless NNAPI was explicitly opted into. CPU is always the fallback. */
+function detectorProviders(androidBackend?: 'cpu' | 'nnapi'): string[] {
+  if (Platform.OS === 'ios') return ['coreml', 'cpu'];
+  return androidBackend === 'nnapi' ? ['nnapi', 'cpu'] : ['cpu'];
 }
 
 export async function createDetector(kind: DetectorKind, opts: DetectorOptions = {}): Promise<Detector> {
-  if (kind === 'yunet') return YuNetDetector.create();
-  if (kind === 'scrfd') return SCRFDDetector.create();
-  if (kind === 'blazeface') return BlazeFaceDetector.create();
+  if (kind === 'yunet') return YuNetDetector.create(opts.androidBackend);
+  if (kind === 'scrfd') return SCRFDDetector.create(opts.androidBackend);
+  if (kind === 'blazeface') return BlazeFaceDetector.create(opts.androidBackend);
   const accurate = opts.accurate ?? true;
   return {
     label: accurate ? 'ML Kit' : 'ML Kit (fast)',
@@ -80,12 +89,12 @@ class YuNetDetector implements Detector {
   label = 'YuNet';
   private constructor(private session: ort.InferenceSession) {}
 
-  static async create(): Promise<YuNetDetector> {
+  static async create(androidBackend?: 'cpu' | 'nnapi'): Promise<YuNetDetector> {
     const path = await ensureNamedAsset(YUNET_ASSET);
-    // CPU only on Android: accelerator EPs (NNAPI, and XNNPACK on graphs like SCRFD) can
-    // hard-abort (SIGABRT, uncatchable by JS) during ORT session creation. CPU never does.
-    console.log('[FML] loading ONNX detector:', path);
-    const providers = Platform.OS === 'ios' ? ['coreml', 'cpu'] : ['cpu'];
+    // CPU is the Android default: accelerator EPs (NNAPI, and XNNPACK on graphs like SCRFD) can
+    // hard-abort (SIGABRT, uncatchable by JS) during ORT session creation. NNAPI is opt-in.
+    const providers = detectorProviders(androidBackend);
+    console.log('[FML] loading ONNX detector:', path, 'providers:', providers.join('+'));
     let session: ort.InferenceSession;
     try {
       session = await ort.InferenceSession.create(path, {
@@ -215,12 +224,12 @@ class SCRFDDetector implements Detector {
   label = 'SCRFD';
   private constructor(private session: ort.InferenceSession) {}
 
-  static async create(): Promise<SCRFDDetector> {
+  static async create(androidBackend?: 'cpu' | 'nnapi'): Promise<SCRFDDetector> {
     const path = await ensureNamedAsset(SCRFD_ASSET);
-    // CPU only on Android: accelerator EPs (NNAPI, and XNNPACK on graphs like SCRFD) can
-    // hard-abort (SIGABRT, uncatchable by JS) during ORT session creation. CPU never does.
-    console.log('[FML] loading ONNX detector:', path);
-    const providers = Platform.OS === 'ios' ? ['coreml', 'cpu'] : ['cpu'];
+    // CPU is the Android default: accelerator EPs (NNAPI, and XNNPACK on graphs like SCRFD) can
+    // hard-abort (SIGABRT, uncatchable by JS) during ORT session creation. NNAPI is opt-in.
+    const providers = detectorProviders(androidBackend);
+    console.log('[FML] loading ONNX detector:', path, 'providers:', providers.join('+'));
     let session: ort.InferenceSession;
     try {
       session = await ort.InferenceSession.create(path, {
@@ -356,12 +365,12 @@ class BlazeFaceDetector implements Detector {
   label = 'BlazeFace';
   private constructor(private session: ort.InferenceSession) {}
 
-  static async create(): Promise<BlazeFaceDetector> {
+  static async create(androidBackend?: 'cpu' | 'nnapi'): Promise<BlazeFaceDetector> {
     const path = await ensureNamedAsset(BLAZE_ASSET);
-    // CPU only on Android: accelerator EPs (NNAPI, and XNNPACK on graphs like SCRFD) can
-    // hard-abort (SIGABRT, uncatchable by JS) during ORT session creation. CPU never does.
-    console.log('[FML] loading ONNX detector:', path);
-    const providers = Platform.OS === 'ios' ? ['coreml', 'cpu'] : ['cpu'];
+    // CPU is the Android default: accelerator EPs (NNAPI, and XNNPACK on graphs like SCRFD) can
+    // hard-abort (SIGABRT, uncatchable by JS) during ORT session creation. NNAPI is opt-in.
+    const providers = detectorProviders(androidBackend);
+    console.log('[FML] loading ONNX detector:', path, 'providers:', providers.join('+'));
     let session: ort.InferenceSession;
     try {
       session = await ort.InferenceSession.create(path, {

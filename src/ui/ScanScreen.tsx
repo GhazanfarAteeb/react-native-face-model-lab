@@ -171,7 +171,7 @@ export default function ScanScreen({ goToResults }: { goToResults: () => void })
         </View>
         <SectionLabel>Parallelism (scan speed)</SectionLabel>
         <View style={styles.chipRow}>
-          {[0, 1, 2, 3, 4, 6, 8, 10, 12, 14, 16, 18, 20].map(n => (
+          {[0, 1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50].map(n => (
             <Chip
               key={n}
               label={n === 0 ? 'Auto' : n === 1 ? '1 (off)' : `×${n}`}
@@ -180,7 +180,7 @@ export default function ScanScreen({ goToResults }: { goToResults: () => void })
             />
           ))}
         </View>
-        <Muted>Auto picks a level from a quick device benchmark. Higher overlaps more I/O & detection (faster) but uses more memory; inference stays serialized for stability. ×8 and above are for experimentation — watch the live health meter for jank/GC stalls and back off if it dips. On Android, levels above ×8 are capped to protect memory (it OOMs otherwise); iOS runs the full level.</Muted>
+        <Muted>Auto picks a level from a quick device benchmark. Higher overlaps more I/O & detection (faster) but uses more memory; inference stays serialized for stability. ×8 and above are for experimentation — the full range runs on both iOS and Android so you can find what fits each device. High levels can OOM-crash weaker phones (Android heap is tighter); watch the live health meter for jank/GC stalls and back off if it dips.</Muted>
         <SectionLabel>Detection resolution</SectionLabel>
         <View style={styles.chipRow}>
           {[
@@ -219,7 +219,31 @@ export default function ScanScreen({ goToResults }: { goToResults: () => void })
               CoreML module + a converted model; until then it falls back to CPU.
             </Muted>
           </>
-        ) : null}
+        ) : (
+          <>
+            <SectionLabel>Android inference backend</SectionLabel>
+            <View style={styles.chipRow}>
+              <Chip label="CPU" active={settings.androidBackend === 'cpu'} onPress={() => setSettings({ androidBackend: 'cpu' })} />
+              <Chip label="GPU (NNAPI)" active={settings.androidBackend === 'nnapi'} onPress={() => setSettings({ androidBackend: 'nnapi' })} />
+            </View>
+            <Muted>
+              CPU is the stable default. <Text style={{ fontWeight: '700' }}>GPU (NNAPI)</Text> runs the detector +
+              embedder on the device’s NNAPI accelerator (GPU / NPU / DSP) and can be faster on some devices. It falls
+              back to CPU if a model won’t load on NNAPI, but accelerator EPs have a history of hard native crashes here —
+              treat it as an experimental benchmark knob and switch back to CPU if a scan crashes.
+            </Muted>
+            <SectionLabel>Keep scanning in background</SectionLabel>
+            <View style={styles.chipRow}>
+              <Chip label="On" active={settings.backgroundScan} onPress={() => setSettings({ backgroundScan: true })} />
+              <Chip label="Off" active={!settings.backgroundScan} onPress={() => setSettings({ backgroundScan: false })} />
+            </View>
+            <Muted>
+              Keeps the scan running when you leave the app or lock the screen (a persistent notification + wake lock).
+              If the system kills it anyway, it <Text style={{ fontWeight: '700' }}>auto-resumes on the next launch</Text>.
+              Uses more battery; turn off to scan only while the app is open.
+            </Muted>
+          </>
+        )}
       </Card>
 
       {resumable ? (

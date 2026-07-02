@@ -16,8 +16,9 @@ import { ensureModelFile, modelFileSize } from './modelAssets';
 import { now } from '../bench/timing';
 
 export interface OnnxEmbedderOptions {
-  /** 'cpu' (default everywhere) or 'coreml' (iOS only — adds the CoreML EP ahead of CPU). */
-  executionProvider?: 'cpu' | 'coreml';
+  /** 'cpu' (default everywhere), 'coreml' (iOS only — adds the CoreML EP ahead of CPU), or
+   *  'nnapi' (Android only — adds the NNAPI GPU/NPU EP ahead of CPU). */
+  executionProvider?: 'cpu' | 'coreml' | 'nnapi';
 }
 
 export class OnnxEmbedder implements Embedder {
@@ -36,11 +37,13 @@ export class OnnxEmbedder implements Embedder {
     const fileSizeBytes = await modelFileSize(spec);
     const t0 = now();
 
-    // CoreML EP is requested only when explicitly asked for (iOS hybrid/coreml-only). It rarely
-    // engages the ANE for these small models and adds a ~1s compile + per-call overhead, so CPU
-    // is the default. Android always lands on CPU (accelerator EPs can hard-abort here).
-    const useCoreml = opts?.executionProvider === 'coreml';
-    const providers = useCoreml ? ['coreml', 'cpu'] : ['cpu'];
+    // Accelerator EPs are requested only when explicitly asked for (iOS CoreML hybrid/coreml-only,
+    // or Android 'nnapi'). CoreML rarely engages the ANE for these small models and adds a ~1s
+    // compile + per-call overhead, so CPU is the default. Android accelerator EPs can hard-abort,
+    // so 'nnapi' is an opt-in benchmark knob; both keep CPU as the fallback provider.
+    const ep = opts?.executionProvider;
+    const providers =
+      ep === 'coreml' ? ['coreml', 'cpu'] : ep === 'nnapi' ? ['nnapi', 'cpu'] : ['cpu'];
     console.log('[FML] loading ONNX embedder:', spec.id, 'providers:', providers.join('+'), path);
     let session: ort.InferenceSession;
     try {
