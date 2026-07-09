@@ -106,9 +106,13 @@ export function Stat({ label, value, hint }: { label: string; value: string; hin
   );
 }
 
-export function Badge({ text, tone = 'dim' }: { text: string; tone?: 'good' | 'warn' | 'bad' | 'dim' }) {
+export function Badge({ text, tone = 'dim' }: { text: string; tone?: 'good' | 'warn' | 'bad' | 'info' | 'dim' }) {
   const color =
-    tone === 'good' ? theme.good : tone === 'warn' ? theme.warn : tone === 'bad' ? theme.bad : theme.textFaint;
+    tone === 'good' ? theme.good
+    : tone === 'warn' ? theme.warn
+    : tone === 'bad' ? theme.bad
+    : tone === 'info' ? theme.accent
+    : theme.textFaint;
   return (
     <View style={[styles.badge, { borderColor: color }]}>
       <Text style={[styles.badgeText, { color }]}>{text}</Text>

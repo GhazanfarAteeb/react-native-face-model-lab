@@ -15,7 +15,7 @@
  * fair comparison.
  */
 
-export type RuntimeKind = 'onnx';
+export type RuntimeKind = 'onnx' | 'coreml';
 export type TensorLayout = 'NCHW' | 'NHWC';
 export type ChannelOrder = 'RGB' | 'BGR';
 export type AlignMode = 'arcface' | 'bbox';
@@ -50,6 +50,9 @@ export interface ModelSpec {
   license: string;
   notes?: string;
   downloadUrl?: string;
+  /** True when the model is ANE-only: runs on Apple Neural Engine via CoreML exclusively,
+   *  not available for ORT-CPU fallback. Used for FP16-converted models optimized for ANE. */
+  aneOnly?: boolean;
   /** Recommended/ready hint shown in the Model screen. */
   enabled: boolean;
 }
@@ -119,7 +122,7 @@ export interface ScanSettings {
   align: 'spec' | 'force-arcface' | 'force-bbox';
   minFaceSize: number;
   /** Face detector: ML Kit (native), or an ONNX detector (YuNet / SCRFD / BlazeFace). */
-  detector: 'mlkit' | 'yunet' | 'scrfd' | 'blazeface';
+  detector: 'mlkit' | 'yunet' | 'scrfd' | 'blazeface' | 'apple_vision';
   /** How many photos to process concurrently. 0 = Auto (device-adaptive, see
    *  deviceProfile); 1 = the old sequential behaviour; higher overlaps native I/O +
    *  detection across photos (ORT inference stays serialized). */
@@ -142,7 +145,7 @@ export interface ScanSettings {
    *                          parallel, each pulling faces from a shared queue (work-stealing).
    *                          Requires the native CoreML module; falls back to CPU if absent.
    *  Must contain at least one entry. */
-  iosBackends: Array<'cpu' | 'coreml'>;
+  iosBackends: Array<'cpu' | 'coreml' | 'ane'>;
   /** Android only: which ONNX Runtime execution provider to run the detector + embedder on.
    *  No effect on iOS (see iosBackends there).
    *   • 'cpu'   → ORT CPU (default; always stable).

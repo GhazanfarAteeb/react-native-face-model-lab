@@ -145,6 +145,88 @@ export const MODEL_REGISTRY: ModelSpec[] = [
   faceLivt('facelivt_v2_s', 'FaceLiVT v2-S', 'facelivt_v2_s.onnx', 'FaceLiVTv2 Small (4.62M params).'),
   faceLivt('facelivt_v2_m', 'FaceLiVT v2-M', 'facelivt_v2_m.onnx', 'FaceLiVTv2 Medium.'),
   faceLivt('facelivt_v2_l', 'FaceLiVT v2-L', 'facelivt_v2_l.onnx', 'FaceLiVTv2 Large (most accurate FaceLiVT).'),
+
+  // ─── BabyArt Models ─────────────────────────────────────────────────────────
+  {
+    id: 'sphereface',
+    label: 'SphereFace (BabyArt)',
+    family: 'SphereFace',
+    runtime: 'coreml',
+    assetName: 'sphere_face',
+    coremlAsset: 'sphere_face.mlmodelc',
+    bundled: true,
+    // SphereFace uses Image type input — CoreML handles BGR conversion + resize internally.
+    // The 96×112 BGR is non-standard; crop.ts must scale the ArcFace template accordingly.
+    input: { width: 96, height: 112, layout: 'NCHW', channels: 'BGR' },
+    norm: { mean: 127.5, std: 127.5 },
+    output: { dim: 512, l2normalized: false, inputName: 'input', outputName: 'output' },
+    align: 'arcface',
+    license: 'Proprietary (BabyArt)',
+    notes:
+      'SphereFace from BabyArt (extracted IPA). Non-standard 96×112 BGR Image input. 20 Conv + PReLU, 512-D embedding. CoreML handles preprocessing internally. Use "ANE (fused)" backend for fastest scanning.',
+    enabled: true,
+  },
+
+  // ─── ANE-Only FP16 Models ──────────────────────────────────────────────────
+  // These models are converted to FP16 and run exclusively on the Apple Neural Engine.
+  // They require the corresponding .mlpackage to be built via scripts/convert-fp16-ane.py
+  // and bundled in the Xcode target.
+  {
+    id: 'facelivt_v2_s_fp16',
+    label: 'FaceLiVT v2-S (FP16/ANE)',
+    family: 'FaceLiVT',
+    runtime: 'coreml',
+    assetName: 'facelivt_v2_s.onnx',
+    coremlAsset: 'facelivt_v2_s_fp16.mlpackage',
+    bundled: true,
+    aneOnly: true,
+    input: { width: 112, height: 112, layout: 'NCHW', channels: 'RGB' },
+    norm: { mean: 127.5, std: 127.5 },
+    output: { dim: 512, l2normalized: false, inputName: 'data', outputName: 'embedding' },
+    align: 'arcface',
+    license: 'novendrastywn/FaceLiVT (research; InsightFace-based)',
+    notes:
+      'FP16 ANE-only variant of FaceLiVT v2-S. Runs exclusively on Apple Neural Engine via CoreML. ⚠️ Known FP16 overflow risk: ANE activations may exceed ~65504, producing NaN. Validate on device before production use.',
+    downloadUrl: 'https://github.com/novendrastywn/FaceLiVT',
+    enabled: true,
+  },
+  {
+    id: 'edgeface_s_fp16',
+    label: 'EdgeFace-S (FP16/ANE)',
+    family: 'EdgeFace',
+    runtime: 'coreml',
+    assetName: 'edgeface_s_gamma_05.onnx',
+    coremlAsset: 'edgeface_s_fp16.mlpackage',
+    bundled: true,
+    aneOnly: true,
+    input: { width: 112, height: 112, layout: 'NCHW', channels: 'RGB' },
+    norm: { mean: 127.5, std: 127.5 },
+    output: { dim: 512, l2normalized: false, inputName: 'input', outputName: 'embedding' },
+    align: 'arcface',
+    license: 'Idiap research licence (verify commercial terms)',
+    notes:
+      'FP16 ANE-only variant of EdgeFace-S. Runs exclusively on Apple Neural Engine via CoreML. CNN architecture handles FP16 cleanly.',
+    downloadUrl: 'https://huggingface.co/Idiap/EdgeFace-S-GAMMA',
+    enabled: true,
+  },
+  {
+    id: 'mobilefacenet_fp16',
+    label: 'MobileFaceNet (FP16/ANE)',
+    family: 'MobileFaceNet',
+    runtime: 'coreml',
+    assetName: 'mobilefacenet.onnx',
+    coremlAsset: 'mobilefacenet_fp16.mlpackage',
+    bundled: true,
+    aneOnly: true,
+    input: { width: 112, height: 112, layout: 'NCHW', channels: 'RGB' },
+    norm: { mean: 127.5, std: 128.0 },
+    output: { dim: 512, l2normalized: false, inputName: 'input.1', outputName: '516' },
+    align: 'arcface',
+    license: 'InsightFace (non-commercial / research)',
+    notes:
+      'FP16 ANE-only variant of MobileFaceNet (InsightFace w600k_mbf). Runs exclusively on Apple Neural Engine via CoreML. Simple CNN — handles FP16 cleanly on ANE.',
+    enabled: true,
+  },
 ];
 
 export function getModel(id: string): ModelSpec | undefined {

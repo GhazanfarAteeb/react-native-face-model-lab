@@ -66,6 +66,32 @@ def register_custom_ops():
             context.add(mb.add(x=ins[0], y=prod, name=node.name))
 
 
+# Ops whose FP16 activations overflow the ~65504 half-precision ceiling in the FaceLiVT
+# transformer and produce NaN/Inf embeddings on the ANE. FaceLiVT v2 uses LINEAR attention
+# (no softmax), so the blowup comes from the normalization layers (batch_norm divides by
+# sqrt(var+eps)) and GELU, plus the reduction/rsqrt primitives that feed them. We keep just
+# these in FP32; convs and matmuls stay FP16 and continue to run on the Neural Engine, so we
+# lose almost none of the ANE speedup while killing the overflow.
+_FP32_KEEP_OPS = frozenset({
+    "batch_norm", "layer_norm", "instance_norm", "l2_norm",
+    "gelu", "erf",
+    "reduce_mean", "reduce_sum", "reduce_max", "reduce_l2_norm",
+    "rsqrt", "sqrt", "exp", "softmax",
+})
+
+
+def _mixed_fp16_precision(ct):
+    """FP16 everywhere EXCEPT the overflow-prone norm/activation ops (see _FP32_KEEP_OPS).
+
+    op_selector returns True for ops to convert to FP16; returning False leaves the op in
+    FP32. If a variant still NaNs after this, add "matmul" (linear-attention accumulation)
+    to _FP32_KEEP_OPS — that's the next-most-likely overflow site — and re-validate on device.
+    """
+    return ct.transform.FP16ComputePrecision(
+        op_selector=lambda op: op.op_type not in _FP32_KEEP_OPS
+    )
+
+
 def convert(key, torch, ct, get_model, hf_hub_download):
     arch, ckpt_file, out_name = VARIANTS[key]
     print(f"== {key} ({arch}) ==")
@@ -88,7 +114,14 @@ def convert(key, torch, ct, get_model, hf_hub_download):
         inputs=[ct.TensorType(name="data", shape=(1, 3, 112, 112), dtype=float)],
         outputs=[ct.TensorType(name="embedding", dtype=float)],
         convert_to="mlprogram",
-        compute_precision=ct.precision.FLOAT16,  # ANE runs fp16
+        # FULL FP32. FaceLiVT v2-S overflows FP16 on the Neural Engine and returns all-NaN
+        # embeddings (verified on device: even mixed precision keeping batch_norm/gelu/matmul
+        # in FP32 still NaN'd — a conv left in FP16 on the ANE blew past the ~65504 ceiling,
+        # sample value -63936). FP32 has no FP16 ops, so CoreML runs it on GPU/CPU (never the
+        # ANE), where overflow is impossible. Slower/warmer than ANE but CORRECT. If ANE speed
+        # is needed later, _mixed_fp16_precision (below) is the starting point — but it must be
+        # re-validated ON DEVICE, not just on Mac (Mac CPU is finite even when the ANE is not).
+        compute_precision=ct.precision.FLOAT32,
         compute_units=ct.ComputeUnit.ALL,
         minimum_deployment_target=ct.target.iOS16,
     )

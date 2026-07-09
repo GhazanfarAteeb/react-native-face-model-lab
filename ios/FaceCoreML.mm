@@ -87,6 +87,52 @@ RCT_EXPORT_METHOD(load:(NSString *)assetName
   }
 }
 
+RCT_EXPORT_METHOD(loadANEOnly:(NSString *)assetName
+                  inputName:(NSString *)inputName
+                  outputName:(NSString *)outputName
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject) {
+  @try {
+    NSString *base = [assetName stringByDeletingPathExtension];
+    NSURL *url = [[NSBundle mainBundle] URLForResource:base withExtension:@"mlmodelc"];
+    if (!url) {
+      resolve(@(-1));
+      return;
+    }
+    MLModelConfiguration *cfg = [MLModelConfiguration new];
+    // ANE-only: force Neural Engine scheduling, no CPU/GPU fallback.
+    // If the model can't run on ANE (e.g. unsupported ops), load will fail.
+    if (@available(iOS 16.0, *)) {
+      cfg.computeUnits = MLComputeUnitsCPUAndNeuralEngine;
+    } else {
+      cfg.computeUnits = MLComputeUnitsAll; // pre-16 fallback; ANE still usable via ALL
+    }
+    NSError *err = nil;
+    MLModel *model = [MLModel modelWithContentsOfURL:url configuration:cfg error:&err];
+    if (!model || err) {
+      resolve(@(-1));
+      return;
+    }
+
+    NSDictionary<NSString *, MLFeatureDescription *> *ins = model.modelDescription.inputDescriptionsByName;
+    NSDictionary<NSString *, MLFeatureDescription *> *outs = model.modelDescription.outputDescriptionsByName;
+    NSString *inName = (inputName.length > 0 && ins[inputName]) ? inputName : ins.allKeys.firstObject;
+    NSString *outName = (outputName.length > 0 && outs[outputName]) ? outputName : outs.allKeys.firstObject;
+    if (!inName || !outName) {
+      resolve(@(-1));
+      return;
+    }
+
+    NSInteger h = _nextHandle++;
+    _models[@(h)] = model;
+    _inNames[@(h)] = inName;
+    _outNames[@(h)] = outName;
+    resolve(@(h));
+  } @catch (NSException *e) {
+    resolve(@(-1));
+  }
+}
+
 RCT_EXPORT_METHOD(infer:(double)handle
                   input:(NSArray<NSNumber *> *)input
                   resolve:(RCTPromiseResolveBlock)resolve
@@ -161,6 +207,58 @@ RCT_EXPORT_METHOD(release:(double)handle
   [_inNames removeObjectForKey:key];
   [_outNames removeObjectForKey:key];
   resolve(nil);
+}
+
+RCT_EXPORT_METHOD(getDeviceInfo:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject) {
+  NSMutableDictionary *info = [NSMutableDictionary new];
+
+  // Check ANE availability via CoreML's supported compute units.
+  if (@available(iOS 16.0, *)) {
+    // MLComputeUnitsCPUAndNeuralEngine is iOS 16+ — if we can use it, ANE is available.
+    info[@"aneAvailable"] = @YES;
+    info[@"computeUnits"] = @"CPU_AND_NE";
+  } else {
+    info[@"aneAvailable"] = @NO;
+    info[@"computeUnits"] = @"ALL";
+  }
+
+  // Device info for context.
+  info[@"systemName"] = [UIDevice currentDevice].systemName;
+  info[@"systemVersion"] = [UIDevice currentDevice].systemVersion;
+  info[@"model"] = [UIDevice currentDevice].model;
+
+  resolve(info);
+}
+
+RCT_EXPORT_METHOD(getModelComputeDevice:(double)handle
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject) {
+  NSNumber *key = @((NSInteger)handle);
+  MLModel *model = _models[key];
+  if (!model) {
+    reject(@"no_model", @"invalid CoreML handle", nil);
+    return;
+  }
+
+  // Report the model's configured compute units.
+  MLModelConfiguration *cfg = model.configuration;
+  NSString *units;
+  switch (cfg.computeUnits) {
+    case MLComputeUnitsCPUOnly:       units = @"CPU_ONLY"; break;
+    case MLComputeUnitsCPUAndGPU:     units = @"CPU_AND_GPU"; break;
+    case MLComputeUnitsAll:           units = @"ALL"; break;
+    case MLComputeUnitsCPUAndNeuralEngine: units = @"CPU_AND_NE"; break;
+    default:                          units = @"UNKNOWN"; break;
+  }
+
+  resolve(@{
+    @"computeUnits": units,
+    @"modelDescription": @{
+      @"inputs": model.modelDescription.inputDescriptionsByName.allKeys,
+      @"outputs": model.modelDescription.outputDescriptionsByName.allKeys,
+    },
+  });
 }
 
 @end

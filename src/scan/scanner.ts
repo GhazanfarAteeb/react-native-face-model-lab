@@ -9,12 +9,14 @@
  */
 import { createEmbedder } from '../runtime/Embedder';
 import type { Embedder } from '../runtime/Embedder';
+import fusedScan from '../runtime/NativeFusedFaceScan';
+import type { FusedScanResult } from '../runtime/NativeFusedFaceScan';
 import { createDetector, type Detector } from '../pipeline/detector';
 import { embedImage, emptySink, type EmbedCacheCtx, type TimingSink } from './embedFace';
 import { normalizeUri } from '../pipeline/normalizeUri';
 import { downscaleForScan } from '../pipeline/downscale';
 import { makeThumb } from '../pipeline/thumbnail';
-import { cosineSimilarity } from '../pipeline/similarity';
+import { cosineSimilarity, l2Normalize } from '../pipeline/similarity';
 import { runPool, withTimeout } from './concurrency';
 import { emptyCacheStats, setCacheEnabled } from './scanCache';
 import { resolveConcurrency } from './deviceProfile';
@@ -47,6 +49,284 @@ function maxSim(e: Float32Array, refs: ReferenceEmbedding[]): number {
     if (s > m) m = s;
   }
   return m;
+}
+
+// ─── Fused ANE Scan Path ───────────────────────────────────────────────────────
+// Uses the native NativeFusedFaceScan module for 100% ANE-accelerated scanning.
+// Bypasses the entire JS→ORT pipeline: detect+crop+align+embed all run in one native call.
+
+interface FusedANERunParams {
+  spec: ModelSpec;
+  references: ReferenceImage[];
+  photoUris: string[];
+  settings: ScanSettings;
+  id: string;
+  startedAt: number;
+  align: AlignMode;
+  onProgress?: (p: ScanProgress) => void;
+  onPhoto?: (e: ScanPhotoEvent) => void;
+  resume?: ScanProgressState;
+  onCheckpoint?: (state: ScanProgressState) => void;
+  shouldCancel?: () => boolean;
+  total: number;
+  wall0: number;
+  sink: TimingSink;
+  refSink: TimingSink;
+  runCounter: number;
+}
+
+async function runFusedANE(params: FusedANERunParams): Promise<ScanRun> {
+  const {
+    spec, references, photoUris, settings, id, startedAt, align,
+    onProgress, onPhoto, resume, onCheckpoint, shouldCancel,
+    total, wall0, sink, refSink, runCounter,
+  } = params;
+
+  const emit = (
+    phase: ScanProgress['phase'],
+    message: string,
+    fraction: number,
+    extra?: Partial<ScanProgress>,
+  ) =>
+    onProgress?.({
+      phase,
+      message,
+      photoIndex: 0,
+      photoCount: total,
+      facesFound: 0,
+      matchesSoFar: 0,
+      fraction,
+      ...extra,
+    });
+
+  try {
+    // ── Load model ──
+    emit('loading', `Loading ${spec.label} (ANE)…`, 0);
+    const inputName = spec.output.inputName ?? '';
+    const outputName = spec.output.outputName ?? '';
+    const loaded = await fusedScan.loadModel(
+      spec.coremlAsset!, inputName, outputName,
+      spec.input.width, spec.input.height,
+    );
+    if (!loaded) {
+      throw new Error(`Failed to load ${spec.coremlAsset} on CoreML/ANE. Model may not be bundled or ANE-compatible.`);
+    }
+    const loadMs = 0; // timing not tracked separately for fused load
+
+    // ── Embed references ──
+    emit('references', `Embedding references (ANE)…`, 0.02);
+    const babyRefs: ReferenceEmbedding[] = [];
+    const parentRefs: ReferenceEmbedding[] = [];
+    const refCounts: RefFaceCounts = {};
+
+    for (const ref of references) {
+      if (shouldCancel?.()) throw new Error('cancelled');
+      const norm = await normalizeUri(ref.uri, settings.maxImageDim);
+      const work = norm.downscaled
+        ? { path: norm.path, cleanup: async () => {} }
+        : await downscaleForScan(norm.path, settings.maxImageDim);
+      try {
+        const result: FusedScanResult = await fusedScan.scanPhoto(work.path, 0.1);
+        refCounts[ref.uri] = result.embeddings.length;
+        if (result.embeddings.length > 0) {
+          // Pick largest face
+          let bestIdx = 0;
+          let bestArea = 0;
+          for (let fi = 0; fi < result.faces.length; fi++) {
+            const f = result.faces[fi];
+            const area = f.width * f.height;
+            if (area > bestArea) { bestArea = area; bestIdx = fi; }
+          }
+          const emb = l2Normalize(new Float32Array(result.embeddings[bestIdx]));
+          babyRefs.push({ bucket: 'baby', uri: ref.uri, embedding: emb });
+          if (ref.bucket === 'parent') {
+            parentRefs.push({ bucket: 'parent', uri: ref.uri, embedding: emb });
+          }
+        }
+      } catch {
+        refCounts[ref.uri] = 0;
+      } finally {
+        await work.cleanup();
+        await norm.cleanup();
+      }
+    }
+
+    if (babyRefs.length === 0 && parentRefs.length === 0) {
+      throw new Error('No face found in any reference image.');
+    }
+
+    // ── Scan gallery ──
+    emit('scanning', `Scanning ${total} photos (ANE)…`, 0.05);
+
+    const done = new Set<number>(resume?.doneIndices ?? []);
+    const matches: ScanMatch[] = resume?.matches ? [...resume.matches] : [];
+    let facesFound = resume?.facesFound ?? 0;
+    let processed = done.size;
+    let sepSum = resume?.sepSum ?? 0;
+    let sepCount = resume?.sepCount ?? 0;
+
+    const snapshot = (): ScanProgressState => ({
+      doneIndices: [...done],
+      matches: [...matches],
+      facesFound,
+      sepSum,
+      sepCount,
+    });
+
+    const mean = (a: number[]): number => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
+    const liveStages = () => ({
+      decode: mean(sink.decode),
+      detect: mean(sink.detect),
+      align: mean(sink.crop),
+      preprocess: mean(sink.preprocess),
+      embed: mean(sink.infer),
+      similarity: mean(sink.similarity),
+      total: mean(sink.total),
+    });
+
+    const concurrency = resolveConcurrency(settings.concurrency);
+    const frame = new FrameBudget(8);
+
+    const scanPhoto = async (i: number): Promise<void> => {
+      if (done.has(i)) return;
+      const uri = photoUris[i];
+      const t0 = now();
+      let faceCount = 0;
+      let bestSim = -1;
+      let bestBucket: RefBucket = 'baby';
+      let thumbUri: string | undefined;
+
+      try {
+        const norm = await normalizeUri(uri, settings.maxImageDim);
+        const work = norm.downscaled
+          ? { path: norm.path, cleanup: async () => {} }
+          : await downscaleForScan(norm.path, settings.maxImageDim);
+
+        try {
+          const result: FusedScanResult = await withTimeout(
+            fusedScan.scanPhoto(work.path, 0.1),
+            PER_PHOTO_TIMEOUT_MS,
+            'fusedScanPhoto',
+          );
+
+          // Record native timings into sink
+          sink.decode.push(result.timings.decodeMs);
+          sink.detect.push(result.timings.detectMs);
+          sink.crop.push(result.timings.cropMs);
+          sink.infer.push(result.timings.embedMs);
+
+          faceCount = result.embeddings.length;
+          const sim0 = now();
+          for (let fi = 0; fi < result.embeddings.length; fi++) {
+            facesFound += 1;
+            const emb = l2Normalize(new Float32Array(result.embeddings[fi]));
+            const simBaby = babyRefs.length ? maxSim(emb, babyRefs) : -1;
+            const simParent = parentRefs.length ? maxSim(emb, parentRefs) : -1;
+            if (babyRefs.length && parentRefs.length) {
+              sepSum += Math.abs(simBaby - simParent);
+              sepCount += 1;
+            }
+            const bucket: RefBucket = simBaby >= simParent ? 'baby' : 'parent';
+            const sim = Math.max(simBaby, simParent);
+            if (sim > bestSim) {
+              bestSim = sim;
+              bestBucket = bucket;
+            }
+            if (sim >= settings.threshold) {
+              const face = result.faces[fi];
+              matches.push({
+                uri,
+                bucket,
+                similarity: sim,
+                faceBox: { left: face.left, top: face.top, width: face.width, height: face.height },
+                imageWidth: result.imageWidth,
+                imageHeight: result.imageHeight,
+              });
+            }
+          }
+          sink.similarity.push(now() - sim0);
+
+          // Thumbnail for live grid
+          if (faceCount > 0) {
+            try {
+              thumbUri = await makeThumb(work.path);
+            } catch { /* non-fatal */ }
+          }
+        } finally {
+          await work.cleanup();
+          await norm.cleanup();
+        }
+      } catch (err: unknown) {
+        // Skip this photo (non-fatal)
+      }
+
+      const totalMs = now() - t0;
+      sink.total.push(totalMs);
+      done.add(i);
+      processed += 1;
+
+      onPhoto?.({
+        index: i,
+        uri,
+        thumbUri,
+        faceCount,
+        matched: bestSim >= settings.threshold,
+        bucket: bestSim >= settings.threshold ? bestBucket : undefined,
+        similarity: bestSim,
+        ms: totalMs,
+      });
+
+      if (processed % 5 === 0) {
+        emit(
+          'scanning',
+          `Scanned ${processed}/${total} · ${facesFound} faces · ${matches.length} matches`,
+          0.05 + (processed / total) * 0.9,
+          { photoIndex: processed, facesFound, matchesSoFar: matches.length, liveStages: liveStages() },
+        );
+      }
+
+      if (processed % CHECKPOINT_EVERY === 0) {
+        onCheckpoint?.(snapshot());
+      }
+    };
+
+    await runPool(total, concurrency, scanPhoto, shouldCancel);
+
+    // ── Finalize ──
+    onCheckpoint?.(snapshot());
+    const durationMs = Date.now() - startedAt;
+
+    return {
+      id,
+      modelId: spec.id,
+      modelLabel: spec.label,
+      detectorLabel: 'Vision (ANE native)',
+      startedAt,
+      durationMs,
+      loadMs,
+      fileSizeBytes: 0,
+      photosScanned: processed,
+      facesFound,
+      matches: matches.sort((a, b) => b.similarity - a.similarity),
+      babyMatchCount: matches.filter(m => m.bucket === 'baby').length,
+      parentMatchCount: matches.filter(m => m.bucket === 'parent').length,
+      avgMsPerPhoto: processed > 0 ? durationMs / processed : 0,
+      facesPerSec: durationMs > 0 ? (facesFound / durationMs) * 1000 : 0,
+      stages: {
+        decode: summarize(sink.decode),
+        detect: summarize(sink.detect),
+        crop: summarize(sink.crop),
+        preprocess: summarize(sink.preprocess),
+        infer: summarize(sink.infer),
+        similarity: summarize(sink.similarity),
+        total: summarize(sink.total),
+      },
+      separation: sepCount > 0 ? sepSum / sepCount : 0,
+      cacheStats: { detectHits: 0, detectMisses: processed, cropHits: 0, cropMisses: facesFound },
+    };
+  } finally {
+    await fusedScan.release();
+  }
 }
 
 export interface RunScanParams {
@@ -177,6 +457,16 @@ export async function runScan(params: RunScanParams): Promise<ScanRun> {
 
   try {
     emit('loading', `Loading ${spec.label}…`, 0);
+
+    // ── Fused ANE path: detect+crop+align+embed all native ──
+    if (settings.iosBackends.includes('ane') && fusedScan && spec.coremlAsset) {
+      return await runFusedANE({
+        spec, references, photoUris, settings, id, startedAt, align,
+        onProgress, onPhoto, resume, onCheckpoint, shouldCancel,
+        total, wall0, sink, refSink, runCounter,
+      });
+    }
+
     embedder = await createEmbedder(spec, { iosBackends: settings.iosBackends, androidBackend: settings.androidBackend });
     detector = await createDetector(settings.detector, { accurate: !settings.fastDetect, androidBackend: settings.androidBackend });
     const loadMs = embedder.loadMs;

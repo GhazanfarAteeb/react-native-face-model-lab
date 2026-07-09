@@ -13,9 +13,16 @@ export interface FaceCoreMLModule {
   /** Load a bundled CoreML model (compiled `.mlmodelc`). `inputName`/`outputName` may be ''
    *  to use the model's first input/output. Returns a handle >=0, or <0 on failure. */
   load(assetName: string, inputName: string, outputName: string): Promise<number>;
+  /** Load a model ANE-only: force Neural Engine scheduling, no CPU/GPU fallback.
+   *  Returns a handle >=0, or <0 if the model can't run on ANE. */
+  loadANEOnly(assetName: string, inputName: string, outputName: string): Promise<number>;
   /** Run one inference; `input` is the preprocessed tensor flattened in the model's layout. */
   infer(handle: number, input: number[]): Promise<number[]>;
   release(handle: number): Promise<void>;
+  /** Get device info: ANE availability, system version, compute units. */
+  getDeviceInfo(): Promise<{ aneAvailable: boolean; computeUnits: string; systemName: string; systemVersion: string; model: string }>;
+  /** Get the compute device configured for a loaded model. */
+  getModelComputeDevice(handle: number): Promise<{ computeUnits: string; modelDescription: { inputs: string[]; outputs: string[] } }>;
 }
 
 function resolve(): FaceCoreMLModule | null {

@@ -53,11 +53,12 @@ export default function ModelScreen() {
             { label: 'YuNet', value: 'yunet' },
             { label: 'SCRFD', value: 'scrfd' },
             { label: 'Blaze', value: 'blazeface' },
+            { label: 'Vision', value: 'apple_vision' },
           ]}
         />
         <Muted style={{ marginTop: spacing.xs }}>
           ML Kit is BlazeFace-family. SCRFD gives 5 landmarks (aligns); BlazeFace gives a
-          mouth-centre only, so it falls back to bbox crop.
+          mouth-centre only, so it falls back to bbox crop. Vision is Apple's native framework.
         </Muted>
         <View style={{ height: spacing.md }} />
         <SectionLabel>Alignment</SectionLabel>
@@ -93,10 +94,12 @@ export default function ModelScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.title}>{m.label}</Text>
                   <Text style={styles.sub}>
-                    {m.family} · {m.runtime.toUpperCase()}
+                    {m.family} · {m.runtime.toUpperCase()}{m.aneOnly ? ' · ANE ONLY' : ''}
                   </Text>
                 </View>
-                {ready === undefined ? null : ready ? (
+                {m.aneOnly ? (
+                  <Badge text="ANE ONLY" tone="info" />
+                ) : ready === undefined ? null : ready ? (
                   <Badge text={m.bundled ? 'BUNDLED' : 'ON DEVICE'} tone="good" />
                 ) : (
                   <Badge text="NEEDS FILE" tone="warn" />
@@ -115,10 +118,18 @@ export default function ModelScreen() {
 
               {ready === false ? (
                 <View style={styles.fetch}>
-                  <Text style={styles.fetchText}>
-                    Push <Text style={styles.code}>{m.assetName}</Text> to{'\n'}
-                    <Text style={styles.code}>{MODELS_DIR}/</Text>
-                  </Text>
+                  {m.aneOnly ? (
+                    <Text style={styles.fetchText}>
+                      Build <Text style={styles.code}>{m.coremlAsset}</Text> via:{'\n'}
+                      <Text style={styles.code}>python scripts/convert-fp16-ane.py</Text>{'\n'}
+                      Then add to Xcode target (Copy Bundle Resources).
+                    </Text>
+                  ) : (
+                    <Text style={styles.fetchText}>
+                      Push <Text style={styles.code}>{m.assetName}</Text> to{'\n'}
+                      <Text style={styles.code}>{MODELS_DIR}/</Text>
+                    </Text>
+                  )}
                   {m.downloadUrl ? (
                     <Text style={styles.link} onPress={() => Linking.openURL(m.downloadUrl!)}>
                       {m.downloadUrl}

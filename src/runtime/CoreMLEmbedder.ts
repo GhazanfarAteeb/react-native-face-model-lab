@@ -27,7 +27,8 @@ export class CoreMLEmbedder implements Embedder {
     private handle: number,
   ) {}
 
-  /** Returns a CoreMLEmbedder, or null if the ANE path is unavailable for this model. */
+  /** Returns a CoreMLEmbedder, or null if the ANE path is unavailable for this model.
+   *  When `spec.aneOnly` is true, loads with ANE-only compute units (no CPU/GPU fallback). */
   static async create(spec: ModelSpec): Promise<CoreMLEmbedder | null> {
     if (!NativeFaceCoreML) return null; // native module not built into this binary
     if (!spec.coremlAsset) return null; // no converted .mlpackage shipped for this model
@@ -36,9 +37,29 @@ export class CoreMLEmbedder implements Embedder {
     const outputName = spec.output.outputName ?? '';
     const t0 = now();
     try {
-      const handle = await NativeFaceCoreML.load(spec.coremlAsset, inputName, outputName);
-      if (handle < 0) return null;
+      const handle = spec.aneOnly
+        ? await NativeFaceCoreML.loadANEOnly(spec.coremlAsset, inputName, outputName)
+        : await NativeFaceCoreML.load(spec.coremlAsset, inputName, outputName);
+      if (handle < 0) {
+        console.log(`[CoreML] FAILED to load ${spec.coremlAsset} (ANE-only=${spec.aneOnly})`);
+        return null;
+      }
       const loadMs = now() - t0;
+
+      // Log ANE/compute device info.
+      try {
+        const deviceInfo = await NativeFaceCoreML.getDeviceInfo();
+        const modelInfo = await NativeFaceCoreML.getModelComputeDevice(handle);
+        console.log(`[CoreML] Loaded ${spec.label} in ${loadMs.toFixed(0)}ms`);
+        console.log(`[CoreML]   Device: ${deviceInfo.model} (${deviceInfo.systemName} ${deviceInfo.systemVersion})`);
+        console.log(`[CoreML]   ANE available: ${deviceInfo.aneAvailable}`);
+        console.log(`[CoreML]   Compute units: ${modelInfo.computeUnits}`);
+        console.log(`[CoreML]   Inputs: ${modelInfo.modelDescription.inputs.join(', ')}`);
+        console.log(`[CoreML]   Outputs: ${modelInfo.modelDescription.outputs.join(', ')}`);
+      } catch {
+        // getDeviceInfo not available (older native module) — skip logging
+      }
+
       // Report the ONNX file size for parity in the UI (the .mlpackage size isn't tracked).
       const fileSizeBytes = await modelFileSize(spec);
       return new CoreMLEmbedder(spec, loadMs, fileSizeBytes, handle);

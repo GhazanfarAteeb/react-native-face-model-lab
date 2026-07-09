@@ -30,7 +30,7 @@ export interface Detector {
   dispose(): Promise<void>;
 }
 
-export type DetectorKind = 'mlkit' | 'yunet' | 'scrfd' | 'blazeface';
+export type DetectorKind = 'mlkit' | 'yunet' | 'scrfd' | 'blazeface' | 'apple_vision';
 
 export interface DetectorOptions {
   /** ML Kit only: accurate (default) vs fast performance mode. */
@@ -50,6 +50,7 @@ export async function createDetector(kind: DetectorKind, opts: DetectorOptions =
   if (kind === 'yunet') return YuNetDetector.create(opts.androidBackend);
   if (kind === 'scrfd') return SCRFDDetector.create(opts.androidBackend);
   if (kind === 'blazeface') return BlazeFaceDetector.create(opts.androidBackend);
+  if (kind === 'apple_vision') return AppleVisionDetector.create(opts.accurate ?? true);
   const accurate = opts.accurate ?? true;
   return {
     label: accurate ? 'ML Kit' : 'ML Kit (fast)',
@@ -462,6 +463,47 @@ class BlazeFaceDetector implements Detector {
       // ignore
     }
   }
+}
+
+// ─── Apple Vision (iOS native) ──────────────────────────────────────────────
+// Uses Apple's Vision framework for face detection. Runs on the Neural Engine via
+// the Vision framework, providing fast native detection without an ONNX model.
+// `accurate` mode uses VNDetectFaceLandmarksRequest (5 landmarks for ArcFace alignment);
+// `fast` mode uses VNDetectFaceRectanglesRequest (bounding boxes only, no landmarks).
+
+class AppleVisionDetector implements Detector {
+  label: string;
+  private useLandmarks: boolean;
+
+  private constructor(useLandmarks: boolean) {
+    this.useLandmarks = useLandmarks;
+    this.label = useLandmarks ? 'Apple Vision' : 'Apple Vision (fast)';
+  }
+
+  static async create(accurate: boolean): Promise<AppleVisionDetector> {
+    return new AppleVisionDetector(accurate);
+  }
+
+  async detect(path: string, minFaceSize: number): Promise<DetectResult> {
+    const native = (await import('../runtime/NativeVisionFaceDetect')).default;
+    if (!native) {
+      throw new Error('Apple Vision detector requires iOS with the NativeVisionFaceDetect native module.');
+    }
+    const result = await native.detect(path, minFaceSize, this.useLandmarks);
+    const faces: DetectedFace[] = result.faces.map(f => ({
+      box: { left: f.left, top: f.top, width: f.width, height: f.height },
+      landmarks: {
+        leftEye: f.leftEye,
+        rightEye: f.rightEye,
+        noseBase: f.noseBase,
+        mouthLeft: f.mouthLeft,
+        mouthRight: f.mouthRight,
+      },
+    }));
+    return { faces, imageWidth: result.imageWidth, imageHeight: result.imageHeight };
+  }
+
+  async dispose(): Promise<void> {}
 }
 
 function iou(a: RawFace, b: RawFace): number {

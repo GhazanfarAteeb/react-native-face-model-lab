@@ -38,6 +38,20 @@ function rootCandidate(spec: ModelSpec): string {
  *  models dir, or sitting at the Documents root awaiting migration). */
 export async function isModelAvailable(spec: ModelSpec): Promise<boolean> {
   await ensureDir();
+  // ANE-only models need the CoreML .mlpackage bundled in the app, not the ONNX file.
+  if (spec.aneOnly && spec.coremlAsset) {
+    if (Platform.OS === 'ios') {
+      return RNFS.exists(`${RNFS.MainBundlePath}/${spec.coremlAsset.replace('.mlpackage', '.mlmodelc')}`);
+    }
+    return false; // ANE-only models are iOS-only
+  }
+  // CoreML-only models with .mlmodelc directory (e.g. SphereFace from BabyArt)
+  if (spec.runtime === 'coreml' && spec.coremlAsset?.endsWith('.mlmodelc')) {
+    if (Platform.OS === 'ios') {
+      return RNFS.exists(`${RNFS.MainBundlePath}/${spec.coremlAsset}`);
+    }
+    return false;
+  }
   if (await RNFS.exists(modelPath(spec))) return true;
   if (await RNFS.exists(rootCandidate(spec))) return true;
   if (!spec.bundled) return false;

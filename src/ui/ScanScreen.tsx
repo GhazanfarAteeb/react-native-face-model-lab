@@ -81,12 +81,20 @@ export default function ScanScreen({ goToResults }: { goToResults: () => void })
   }, [settings.maxPhotos, startScan, goToResults]);
 
   // Toggle an iOS backend on/off, never leaving the set empty (one engine is always selected).
-  const toggleBackend = (b: 'cpu' | 'coreml') => {
+  // ANE is exclusive — selecting it clears cpu/coreml; selecting cpu/coreml clears ane.
+  const toggleBackend = (b: 'cpu' | 'coreml' | 'ane') => {
     const cur = settings.iosBackends;
-    const next = cur.includes(b) ? cur.filter(x => x !== b) : [...cur, b];
-    setSettings({ iosBackends: next.length ? next : [b] });
+    if (b === 'ane') {
+      // ANE is exclusive — replaces all other backends
+      setSettings({ iosBackends: cur.includes('ane') ? ['cpu'] : ['ane'] });
+    } else {
+      // CPU/CoreML: toggle normally, but clear ANE if selecting either
+      const next = cur.includes(b) ? cur.filter(x => x !== b && x !== 'ane') : [...cur.filter(x => x !== 'ane'), b];
+      setSettings({ iosBackends: next.length ? next : [b] });
+    }
   };
   const hybrid = settings.iosBackends.includes('cpu') && settings.iosBackends.includes('coreml');
+  const aneFused = settings.iosBackends.includes('ane');
 
   // Live scan grid takes over the whole tab while a scan runs.
   if (scanning && progress) return <LiveScanScreen progress={progress} />;
@@ -207,17 +215,26 @@ export default function ScanScreen({ goToResults }: { goToResults: () => void })
         <Muted>Reuses detection & crops when re-scanning the same photos with another model — only inference re-runs. Turn off to measure cold cost.</Muted>
         {Platform.OS === 'ios' ? (
           <>
-            <SectionLabel>iOS inference backend{hybrid ? ' · ANE hybrid' : ''}</SectionLabel>
+            <SectionLabel>iOS inference backend{hybrid ? ' · ANE hybrid' : ''}{aneFused ? ' · 100% ANE' : ''}</SectionLabel>
             <View style={styles.chipRow}>
               <Chip label="CPU" active={settings.iosBackends.includes('cpu')} onPress={() => toggleBackend('cpu')} />
               <Chip label="CoreML" active={settings.iosBackends.includes('coreml')} onPress={() => toggleBackend('coreml')} />
+              <Chip label="ANE (fused)" active={aneFused} onPress={() => toggleBackend('ane')} />
             </View>
-            <Muted>
-              Select one engine for a clean per-model benchmark (CPU is fastest for these small models; CoreML
-              benchmarks the ORT EP). Select <Text style={{ fontWeight: '700' }}>both</Text> to enable the ANE hybrid —
-              CPU and the native Neural-Engine embedder run in parallel, sharing the face queue. Hybrid needs the native
-              CoreML module + a converted model; until then it falls back to CPU.
-            </Muted>
+            {aneFused ? (
+              <Muted>
+                <Text style={{ fontWeight: '700' }}>100% native ANE pipeline</Text> — detect, crop, align, and embed
+                all run in a single Apple Neural Engine call. Fastest possible path, matches rnbaby/BabyArt production
+                speed (~70ms/photo vs ~1,300ms on CPU). iOS only. Requires a CoreML-compatible model.
+              </Muted>
+            ) : (
+              <Muted>
+                Select one engine for a clean per-model benchmark (CPU is fastest for these small models; CoreML
+                benchmarks the ORT EP). Select <Text style={{ fontWeight: '700' }}>both</Text> to enable the ANE hybrid —
+                CPU and the native Neural-Engine embedder run in parallel, sharing the face queue. Select{' '}
+                <Text style={{ fontWeight: '700' }}>ANE (fused)</Text> for the fastest native path.
+              </Muted>
+            )}
           </>
         ) : (
           <>

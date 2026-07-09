@@ -31,8 +31,8 @@ export interface Embedder {
 }
 
 export interface EmbedderOptions {
-  /** iOS only: which backend(s) to use. Ignored on Android (see androidBackend). */
-  iosBackends?: Array<'cpu' | 'coreml'>;
+  /** iOS only: which backend(s) to use. 'ane' = fused native path (bypasses this factory). */
+  iosBackends?: Array<'cpu' | 'coreml' | 'ane'>;
   /** Android only: 'cpu' (default) or 'nnapi' (GPU/NPU accelerator EP). Ignored on iOS. */
   androidBackend?: 'cpu' | 'nnapi';
 }
@@ -40,6 +40,18 @@ export interface EmbedderOptions {
 export async function createEmbedder(spec: ModelSpec, opts?: EmbedderOptions): Promise<Embedder> {
   const { OnnxEmbedder } = await import('./OnnxEmbedder');
   const backends = opts?.iosBackends?.length ? opts.iosBackends : ['cpu'];
+
+  // ANE-only models: force CoreML-only path, ignore iosBackends settings.
+  if (spec.aneOnly) {
+    if (Platform.OS === 'ios') {
+      const { CoreMLEmbedder } = await import('./CoreMLEmbedder');
+      const ane = await CoreMLEmbedder.create(spec);
+      if (ane) return ane;
+      // ANE-only model failed to load on CoreML — can't fall back to CPU.
+      throw new Error(`ANE-only model "${spec.label}" failed to load on CoreML/ANE.`);
+    }
+    throw new Error(`ANE-only model "${spec.label}" requires iOS with Apple Neural Engine.`);
+  }
 
   // Android (or any non-iOS): plain ORT CPU, or the NNAPI accelerator EP when opted in.
   if (Platform.OS !== 'ios') {
