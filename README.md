@@ -252,7 +252,7 @@ The implementation deliberately keeps the dependency surface focused: **Camera R
 
 <div align="center">
 
-<img src="https://skillicons.dev/icons?i=react,ts,android,apple,onnx,docker,git,github" alt="Tech stack" />
+<img src="https://skillicons.dev/icons?i=react,ts,androidstudio,apple,git,github" alt="Tech stack" />
 
 <br />
 
